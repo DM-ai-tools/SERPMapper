@@ -1,5 +1,5 @@
 // ============================================================
-// Google Places API — resolve business URL to address + lat/lng
+// Google Places API (New) — resolve URL to address + lat/lng
 // ============================================================
 
 export interface BusinessInfo {
@@ -13,11 +13,9 @@ export interface BusinessInfo {
 /**
  * Resolve a business URL to its Google Places record.
  * Strategy:
- *   1. Extract the domain from the URL.
- *   2. Search Google Places "findplacefromtext" with the domain as query.
- *   3. Return the first match's name, address, and coordinates.
- *
- * Falls back to geocoding the `city` string if Places can't find the business.
+ *   1. Search by domain + city
+ *   2. Fallback to a human-friendly brand guess + city
+ *   3. Fallback to city center using Places API (New) searchText
  */
 export async function resolveBusinessFromUrl(
   url: string,
@@ -28,70 +26,62 @@ export async function resolveBusinessFromUrl(
 
   const domain = normaliseDomain(url);
 
-  // Try Places Text Search first (most accurate for AU SMBs)
-  const searchUrl =
-    `https://maps.googleapis.com/maps/api/place/textsearch/json` +
-    `?query=${encodeURIComponent(domain + " " + city)}` +
-    `&region=au` +
-    `&key=${apiKey}`;
+  // 1) Best-effort: domain + city
+  const byDomain = await searchTextPlace(`${domain} ${city} Australia`, apiKey);
+  if (byDomain) return byDomain;
 
-  const res = await fetch(searchUrl);
-  if (!res.ok) throw new Error(`Google Places API error: ${res.status}`);
+  // 2) Fallback: human-readable brand guess + city
+  const brandGuess = guessBrandFromDomain(domain);
+  const byBrand = await searchTextPlace(`${brandGuess} ${city} Australia`, apiKey);
+  if (byBrand) return byBrand;
 
-  const data = (await res.json()) as {
-    status: string;
-    results: Array<{
-      name: string;
-      formatted_address: string;
-      place_id: string;
-      geometry: { location: { lat: number; lng: number } };
-    }>;
-  };
-
-  if (data.status === "OK" && data.results.length > 0) {
-    const place = data.results[0];
-    return {
-      name: place.name,
-      address: place.formatted_address,
-      lat: place.geometry.location.lat,
-      lng: place.geometry.location.lng,
-      placeId: place.place_id,
-    };
-  }
-
-  // Fallback: geocode the city to get a central lat/lng
-  return geocodeCity(city, apiKey);
+  // 3) Fallback: city center (still via Places API New, no Geocoding dependency)
+  return searchTextPlace(`${city} Australia`, apiKey);
 }
 
-async function geocodeCity(city: string, apiKey: string): Promise<BusinessInfo | null> {
-  const geocodeUrl =
-    `https://maps.googleapis.com/maps/api/geocode/json` +
-    `?address=${encodeURIComponent(city + ", Australia")}` +
-    `&key=${apiKey}`;
+async function searchTextPlace(textQuery: string, apiKey: string): Promise<BusinessInfo | null> {
+  const res = await fetch("https://places.googleapis.com/v1/places:searchText", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Goog-Api-Key": apiKey,
+      "X-Goog-FieldMask":
+        "places.id,places.displayName,places.formattedAddress,places.location",
+    },
+    body: JSON.stringify({
+      textQuery,
+      regionCode: "AU",
+      languageCode: "en",
+      maxResultCount: 5,
+    }),
+  });
 
-  const res = await fetch(geocodeUrl);
-  if (!res.ok) return null;
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`Google Places API (New) error: ${res.status} ${detail}`);
+  }
 
   const data = (await res.json()) as {
-    status: string;
-    results: Array<{
-      formatted_address: string;
-      geometry: { location: { lat: number; lng: number } };
+    places?: Array<{
+      id: string;
+      displayName?: { text?: string };
+      formattedAddress?: string;
+      location?: { latitude?: number; longitude?: number };
     }>;
   };
 
-  if (data.status === "OK" && data.results.length > 0) {
-    const r = data.results[0];
-    return {
-      name: city,
-      address: r.formatted_address,
-      lat: r.geometry.location.lat,
-      lng: r.geometry.location.lng,
-      placeId: "",
-    };
-  }
+  const place = data.places?.[0];
+  const lat = place?.location?.latitude;
+  const lng = place?.location?.longitude;
+  if (!place || lat === undefined || lng === undefined) return null;
 
-  return null;
+  return {
+    name: place.displayName?.text ?? textQuery,
+    address: place.formattedAddress ?? textQuery,
+    lat,
+    lng,
+    placeId: place.id ?? "",
+  };
 }
 
 function normaliseDomain(url: string): string {
@@ -101,4 +91,9 @@ function normaliseDomain(url: string): string {
     .replace(/^www\./, "")
     .replace(/\/$/, "")
     .split("/")[0];
+}
+
+function guessBrandFromDomain(domain: string): string {
+  const base = domain.split(".")[0] ?? domain;
+  return base.replace(/[-_]+/g, " ").trim();
 }

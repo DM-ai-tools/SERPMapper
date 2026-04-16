@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json(rows, {
       headers: {
-        "Cache-Control": "public, max-age=86400, s-maxage=86400",
+        "Cache-Control": "public, max-age=3600, s-maxage=3600",
       },
     });
   } catch (err) {

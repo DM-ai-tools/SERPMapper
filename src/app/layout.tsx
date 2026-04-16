@@ -41,20 +41,23 @@ export default function RootLayout({
         <header className="border-b border-gray-200 bg-white/90 backdrop-blur sticky top-0 z-50">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-14 flex items-center justify-between">
             <a href="/" className="flex items-center gap-2 font-black text-lg text-gray-900">
-              <span className="text-brand-600">SERP</span>Mapper
+              <span className="text-brand-600">SERPMapper</span>
             </a>
             <nav className="hidden md:flex items-center gap-6 text-sm text-gray-600">
               <a href="/#how-it-works" className="hover:text-gray-900 transition-colors">
                 How it works
               </a>
+              <a href="/blog" className="hover:text-gray-900 transition-colors">
+                Blog
+              </a>
               <a
-                href={process.env.NEXT_PUBLIC_WAITLIST_URL ?? "https://dotmappers.in/waitlist"}
+                href="https://dotmappers.in/book"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="bg-brand-600 text-white font-semibold px-4 py-1.5 rounded-lg
                            hover:bg-brand-700 transition-colors"
               >
-                Join Waitlist
+                Book a Free Call
               </a>
             </nav>
           </div>

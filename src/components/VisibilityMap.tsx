@@ -10,6 +10,10 @@
  * The parent MUST render this component with:
  *   const VisibilityMap = dynamic(() => import("./VisibilityMap"), { ssr: false })
  * because Leaflet uses browser-only APIs.
+ *
+ * Race-condition note: Leaflet loads asynchronously. Results from SSE may arrive
+ * before the map is ready. We keep resultsRef always up-to-date so the map
+ * initialisation callback can immediately draw whatever results already exist.
  */
 
 import { useEffect, useRef, useCallback } from "react";
@@ -85,6 +89,10 @@ export default function VisibilityMap({
 }: VisibilityMapProps) {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<import("leaflet").Map | null>(null);
+  const initializingMapRef = useRef(false);
+  // Always holds the latest results so map-init callback can render them
+  const resultsRef = useRef<SerpMapResult[]>(results);
+  const isPartialRef = useRef(isPartial);
   // Maps result_id → Leaflet layer (GeoJSON polygon or CircleMarker fallback)
   const layersRef = useRef<Map<string, LayerHandle>>(new Map());
   // Tracks which suburb_ids already have their polygon loaded
@@ -92,7 +100,9 @@ export default function VisibilityMap({
 
   // ── Fetch GeoJSON polygons for a batch of suburb_ids ─────────
   const fetchPolygons = useCallback(
-    async (suburbIds: string[]): Promise<Record<string, GeoJSONPolygon>> => {
+    async (
+      suburbIds: string[]
+    ): Promise<Record<string, { polygon?: GeoJSONPolygon; lat?: number; lng?: number }>> => {
       if (suburbIds.length === 0) return {};
       try {
         const res = await fetch("/api/suburb-geo", {
@@ -101,12 +111,17 @@ export default function VisibilityMap({
           body: JSON.stringify({ suburb_ids: suburbIds }),
         });
         if (!res.ok) return {};
-        const data: Array<Pick<SuburbCoordinate, "suburb_id" | "geojson_polygon">> =
+        const data: Array<Pick<SuburbCoordinate, "suburb_id" | "geojson_polygon" | "lat" | "lng">> =
           await res.json();
         return Object.fromEntries(
-          data
-            .filter((d) => d.geojson_polygon)
-            .map((d) => [d.suburb_id, d.geojson_polygon!])
+          data.map((d) => [
+            d.suburb_id,
+            {
+              polygon: d.geojson_polygon ?? undefined,
+              lat: toNumberOrUndefined(d.lat),
+              lng: toNumberOrUndefined(d.lng),
+            },
+          ])
         );
       } catch {
         return {};
@@ -115,23 +130,124 @@ export default function VisibilityMap({
     []
   );
 
+  // ── Core render function: draw/update layers on the map ───────
+  // Extracted so it can be called from both the map-init callback
+  // and the results-changed effect without duplicating logic.
+  const renderLayers = useCallback(
+    (currentResults: SerpMapResult[], partial: boolean) => {
+      if (!mapInstanceRef.current || !L) return;
+
+      const map = mapInstanceRef.current;
+      const displayResults = partial ? currentResults.slice(0, 10) : currentResults;
+      const suburbIdsToFetch: string[] = [];
+
+      for (const result of displayResults) {
+        const band = getRankBand(result.rank_position);
+        const color = RANK_COLORS[band];
+        const existing = layersRef.current.get(result.result_id);
+
+        if (existing) {
+          (existing as import("leaflet").Path).setStyle(polygonStyle(color));
+        } else {
+          const circle = L!.circleMarker([businessLat, businessLng], {
+            radius: 10,
+            ...polygonStyle(color, 1),
+          });
+          circle.bindTooltip(tooltipHtml(result), {
+            sticky: true,
+            opacity: 1,
+            className: "serp-tooltip",
+          });
+          circle.addTo(map);
+          layersRef.current.set(result.result_id, circle);
+
+          if (result.suburb_id && !polygonLoadedRef.current.has(result.suburb_id)) {
+            suburbIdsToFetch.push(result.suburb_id);
+            polygonLoadedRef.current.add(result.suburb_id);
+          }
+        }
+      }
+
+      if (suburbIdsToFetch.length === 0) return;
+
+      fetchPolygons(suburbIdsToFetch).then((geoMap) => {
+        if (!mapInstanceRef.current || !L) return;
+
+        for (const result of displayResults) {
+          if (!result.suburb_id) continue;
+          const geo = geoMap[result.suburb_id];
+          if (!geo) continue;
+
+          const band = getRankBand(result.rank_position);
+          const color = RANK_COLORS[band];
+
+          const placeholder = layersRef.current.get(result.result_id);
+          if (placeholder) mapInstanceRef.current.removeLayer(placeholder);
+
+          if (geo.polygon) {
+            const geoLayer = L!.geoJSON(geo.polygon as GeoJSON.Geometry, {
+              style: () => polygonStyle(color),
+              onEachFeature: (_feature, layer) => {
+                layer.bindTooltip(tooltipHtml(result), {
+                  sticky: true,
+                  opacity: 1,
+                  className: "serp-tooltip",
+                });
+                layer.on("mouseover", function (this: import("leaflet").Path) {
+                  this.setStyle({ weight: 2, fillOpacity: 0.7 });
+                });
+                layer.on("mouseout", function (this: import("leaflet").Path) {
+                  this.setStyle({ weight: 1, fillOpacity: 0.5 });
+                });
+              },
+            });
+            geoLayer.addTo(mapInstanceRef.current);
+            layersRef.current.set(result.result_id, geoLayer);
+          } else if (geo.lat !== undefined && geo.lng !== undefined) {
+            const circle = L!.circleMarker([geo.lat, geo.lng], {
+              radius: 10,
+              ...polygonStyle(color, 1),
+            });
+            circle.bindTooltip(tooltipHtml(result), {
+              sticky: true,
+              opacity: 1,
+              className: "serp-tooltip",
+            });
+            circle.addTo(mapInstanceRef.current);
+            layersRef.current.set(result.result_id, circle);
+          }
+        }
+      });
+    },
+    // businessLat/Lng are stable (map re-mounts if they change via key prop)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [fetchPolygons, businessLat, businessLng]
+  );
+
+  // ── Keep refs in sync with latest props ──────────────────────
+  useEffect(() => {
+    resultsRef.current = results;
+    isPartialRef.current = isPartial;
+  });
+
   // ── Initialise map (runs once) ────────────────────────────────
   useEffect(() => {
-    if (!mapRef.current || mapInstanceRef.current) return;
+    if (!mapRef.current || mapInstanceRef.current || initializingMapRef.current) return;
+    initializingMapRef.current = true;
 
     import("leaflet").then((leaflet) => {
+      if (!mapRef.current || mapInstanceRef.current) {
+        initializingMapRef.current = false;
+        return;
+      }
       L = leaflet;
 
-      // Fix Leaflet default icon path broken by webpack/Next.js
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       delete (L.Icon.Default.prototype as any)._getIconUrl;
       L.Icon.Default.mergeOptions({
-        iconRetinaUrl:
-          "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
-        iconUrl:
-          "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
-        shadowUrl:
-          "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
+        iconRetinaUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
+        iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
+        shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
       });
 
       const map = L.map(mapRef.current!, {
@@ -141,7 +257,6 @@ export default function VisibilityMap({
         attributionControl: true,
       });
 
-      // CARTO Positron — clean light-grey basemap; makes coloured polygons pop
       L.tileLayer(
         "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
         {
@@ -152,7 +267,6 @@ export default function VisibilityMap({
         }
       ).addTo(map);
 
-      // Business location marker (on top of polygons, z-index handled by pane)
       const markerPane = map.createPane("markerPane");
       markerPane.style.zIndex = "650";
       L.marker([businessLat, businessLng], { pane: "markerPane" })
@@ -162,6 +276,14 @@ export default function VisibilityMap({
         .addTo(map);
 
       mapInstanceRef.current = map;
+      initializingMapRef.current = false;
+
+      // ── Draw any results that arrived before the map was ready ──
+      if (resultsRef.current.length > 0) {
+        renderLayers(resultsRef.current, isPartialRef.current);
+      }
+    }).catch(() => {
+      initializingMapRef.current = false;
     });
 
     return () => {
@@ -171,100 +293,15 @@ export default function VisibilityMap({
       polygonLoadedRef.current.clear();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [businessLat, businessLng]);
+  }, []);
 
   // ── Render / update layers when results arrive ────────────────
   useEffect(() => {
+    // Guard: if the map isn't ready yet, the init callback will call renderLayers
+    // once it finishes, so we skip here to avoid double-rendering.
     if (!mapInstanceRef.current || !L) return;
-
-    const map = mapInstanceRef.current;
-    const displayResults = isPartial ? results.slice(0, 10) : results;
-
-    // ── Step 1: For results that already have a layer, just update colour
-    //           For new results, add a circle-marker placeholder immediately
-    const suburbIdsToFetch: string[] = [];
-
-    for (const result of displayResults) {
-      const band = getRankBand(result.rank_position);
-      const color = RANK_COLORS[band];
-      const existing = layersRef.current.get(result.result_id);
-
-      if (existing) {
-        // Update colour in-place (no re-create)
-        (existing as import("leaflet").Path).setStyle(
-          polygonStyle(color)
-        );
-      } else {
-        // Add circle-marker as instant placeholder
-        // Supabase doesn't store lat/lng on the result row — use business location
-        // as a temporary pin until the polygon loads from suburb_coordinates.
-        // The polygon will replace this circle once fetched.
-        const circle = L!.circleMarker([businessLat, businessLng], {
-          radius: 10,
-          ...polygonStyle(color, 1),
-        });
-        circle.bindTooltip(tooltipHtml(result), {
-          sticky: true,
-          opacity: 1,
-          className: "serp-tooltip",
-        });
-        circle.addTo(map);
-        layersRef.current.set(result.result_id, circle);
-
-        // Queue this suburb for polygon fetch if not already loaded
-        if (result.suburb_id && !polygonLoadedRef.current.has(result.suburb_id)) {
-          suburbIdsToFetch.push(result.suburb_id);
-          polygonLoadedRef.current.add(result.suburb_id); // mark to avoid duplicate requests
-        }
-      }
-    }
-
-    // ── Step 2: Fetch actual suburb polygons and replace circle-markers ──
-    if (suburbIdsToFetch.length === 0) return;
-
-    fetchPolygons(suburbIdsToFetch).then((geoMap) => {
-      if (!mapInstanceRef.current || !L) return;
-
-      for (const result of displayResults) {
-        if (!result.suburb_id) continue;
-        const polygon = geoMap[result.suburb_id];
-        if (!polygon) continue;
-
-        const band = getRankBand(result.rank_position);
-        const color = RANK_COLORS[band];
-
-        // Remove the circle-marker placeholder
-        const placeholder = layersRef.current.get(result.result_id);
-        if (placeholder) {
-          mapInstanceRef.current.removeLayer(placeholder);
-        }
-
-        // Add the real GeoJSON polygon
-        const geoLayer = L!.geoJSON(
-          polygon as GeoJSON.Geometry,
-          {
-            style: () => polygonStyle(color),
-            onEachFeature: (_feature, layer) => {
-              layer.bindTooltip(tooltipHtml(result), {
-                sticky: true,
-                opacity: 1,
-                className: "serp-tooltip",
-              });
-              layer.on("mouseover", function (this: import("leaflet").Path) {
-                this.setStyle({ weight: 2, fillOpacity: 0.7 });
-              });
-              layer.on("mouseout", function (this: import("leaflet").Path) {
-                this.setStyle({ weight: 1, fillOpacity: 0.5 });
-              });
-            },
-          }
-        );
-
-        geoLayer.addTo(mapInstanceRef.current);
-        layersRef.current.set(result.result_id, geoLayer);
-      }
-    });
-  }, [results, isPartial, businessLat, businessLng, fetchPolygons]);
+    renderLayers(results, isPartial);
+  }, [results, isPartial, renderLayers]);
 
   return (
     <div className="relative w-full h-full">
@@ -304,6 +341,12 @@ export default function VisibilityMap({
       `}</style>
     </div>
   );
+}
+
+function toNumberOrUndefined(value: unknown): number | undefined {
+  if (value === null || value === undefined) return undefined;
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(n) ? n : undefined;
 }
 
 // ─────────────────────────────────────────────────────────────

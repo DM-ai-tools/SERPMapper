@@ -6,6 +6,12 @@ declare global {
   var _pgPool: Pool | undefined;
 }
 
+// Migration promise — ensures the ALTER TABLE completes before any route uses the columns
+declare global {
+  // eslint-disable-next-line no-var
+  var _pgMigration: Promise<void> | undefined;
+}
+
 function createPool(): Pool {
   if (!process.env.DATABASE_URL) {
     throw new Error("DATABASE_URL environment variable is not set");
@@ -18,6 +24,25 @@ export function getPool(): Pool {
     global._pgPool = createPool();
   }
   return global._pgPool;
+}
+
+/** Awaitable — call at the top of any route that uses the OTP columns. */
+export async function ensureMigrations(): Promise<void> {
+  if (!global._pgMigration) {
+    global._pgMigration = (async () => {
+      try {
+        await getPool().query(`
+          ALTER TABLE serpmap_leads
+            ADD COLUMN IF NOT EXISTS otp_code        TEXT,
+            ADD COLUMN IF NOT EXISTS otp_expires_at  TIMESTAMPTZ,
+            ADD COLUMN IF NOT EXISTS email_verified  BOOLEAN DEFAULT FALSE
+        `);
+      } catch {
+        // Table may not exist yet on a fresh install — ignore
+      }
+    })();
+  }
+  return global._pgMigration;
 }
 
 /** Run a SELECT and return all rows. */

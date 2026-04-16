@@ -1,16 +1,25 @@
 import { NextRequest, NextResponse } from "next/server";
 import { query, queryOne, execute, insertReturning } from "@/lib/db";
 import { resolveBusinessFromUrl } from "@/lib/places";
-import { getSuburbsInRadius, buildCacheKey, getSuburbVolume } from "@/lib/suburbs";
-import { postLocalPackTasks } from "@/lib/dataforseo";
-import { AnalyzeRequest, AnalyzeResponse } from "@/lib/types";
+import { getSuburbsInRadius, getSuburbVolume } from "@/lib/suburbs";
+import { getLiveResults, findBusinessRank, DFSTaskPostRequest } from "@/lib/dataforseo";
+import {
+  generateVisibilitySummary,
+  generateOpportunityCards,
+  generateCtaCopy,
+} from "@/lib/claude";
+import { calculateVisibilityScore, getTopMissedSuburbs, buildReportSummary } from "@/lib/scoring";
+import { AnalyzeRequest, AnalyzeResponse, SerpMapResult } from "@/lib/types";
 
 export const maxDuration = 60;
 
 export async function POST(req: NextRequest) {
   try {
     const body: AnalyzeRequest = await req.json();
-    const { url, keyword, city, radius_km = 30 } = body;
+    const url       = (body.url ?? "").trim();
+    const keyword   = (body.keyword ?? "").trim();
+    const city      = (body.city ?? "").trim();
+    const radius_km = body.radius_km ?? 30;
 
     if (!url || !keyword || !city) {
       return NextResponse.json(
@@ -27,7 +36,6 @@ export async function POST(req: NextRequest) {
       "SELECT reports_count, daily_limit FROM serpmap_quota WHERE quota_date = $1",
       [today]
     );
-
     const dailyLimit = Number(process.env.DAILY_REPORT_QUOTA ?? 200);
     if (quota && quota.reports_count >= (quota.daily_limit ?? dailyLimit)) {
       return NextResponse.json(
@@ -37,30 +45,21 @@ export async function POST(req: NextRequest) {
     }
 
     // ──────────────────────────────────────────
-    // 2. Cache check
+    // 2. Delete any previous reports for the same url+keyword+city
+    //    so every search is always fresh — no stale data is ever reused
     // ──────────────────────────────────────────
-    const cacheKey = buildCacheKey(url, keyword, radius_km);
-    const cached = await queryOne<{ report_id: string }>(
-      "SELECT report_id FROM serpmap_cache_index WHERE cache_key = $1 AND expires_at > NOW()",
-      [cacheKey]
-    );
-
-    if (cached) {
-      const response: AnalyzeResponse = {
-        report_id: cached.report_id,
-        status: "completed",
-        cached: true,
-      };
-      return NextResponse.json(response);
-    }
+    await execute(
+      "DELETE FROM serpmap_reports WHERE business_url = $1 AND keyword = $2 AND city = $3",
+      [url, keyword, city]
+    ).catch(() => {}); // non-critical — don't fail the whole request if this errors
 
     // ──────────────────────────────────────────
-    // 3. Resolve business address from URL
+    // 3. Resolve business address from URL (live Google Places lookup)
     // ──────────────────────────────────────────
     const business = await resolveBusinessFromUrl(url, city);
-    const businessLat = business?.lat ?? null;
-    const businessLng = business?.lng ?? null;
-    const businessName = business?.name ?? null;
+    const businessLat     = business?.lat ?? null;
+    const businessLng     = business?.lng ?? null;
+    const businessName    = business?.name ?? null;
     const businessAddress = business?.address ?? null;
 
     if (!businessLat || !businessLng) {
@@ -71,7 +70,7 @@ export async function POST(req: NextRequest) {
     }
 
     // ──────────────────────────────────────────
-    // 4. Build suburb grid
+    // 4. Build suburb grid (live — no cache)
     // ──────────────────────────────────────────
     const suburbs = await getSuburbsInRadius(businessLat, businessLng, radius_km, keyword);
 
@@ -82,62 +81,168 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Deduplicate suburbs by suburb_id to prevent duplicate result rows
+    const uniqueSuburbs = suburbs.filter(
+      (s, i, arr) => arr.findIndex(x => x.suburb_id === s.suburb_id) === i
+    );
+
     // ──────────────────────────────────────────
-    // 5. Create report record
+    // 5. Create a fresh report record (no cache_key — always a new UUID)
     // ──────────────────────────────────────────
     const report = await insertReturning<{ report_id: string }>(
       `INSERT INTO serpmap_reports
          (business_url, business_name, keyword, city, business_lat, business_lng,
-          business_address, radius_km, status, suburbs_total, cache_key)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'processing',$9,$10)
+          business_address, radius_km, status, suburbs_total)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'processing',$9)
        RETURNING report_id`,
       [url, businessName, keyword, city, businessLat, businessLng,
-       businessAddress, radius_km, suburbs.length, cacheKey]
+       businessAddress, radius_km, uniqueSuburbs.length]
     );
-
     const reportId = report.report_id;
 
     // ──────────────────────────────────────────
-    // 6. Create result placeholder rows
+    // 6. Create result placeholder rows (one per unique suburb)
     // ──────────────────────────────────────────
-    for (const s of suburbs) {
+    for (const s of uniqueSuburbs) {
       await execute(
         `INSERT INTO serpmap_results
            (report_id, suburb_id, suburb_name, suburb_state, monthly_volume, dataforseo_status)
-         VALUES ($1,$2,$3,$4,$5,'pending')`,
+         VALUES ($1,$2,$3,$4,$5,'processing')`,
         [reportId, s.suburb_id, s.name, s.state, getSuburbVolume(s, keyword)]
       );
     }
 
     // ──────────────────────────────────────────
-    // 7. Batch post DataforSEO tasks
+    // 7. Call DataforSEO LIVE endpoint — fresh data every time, no polling
     // ──────────────────────────────────────────
-    const dfsTaskRequests = suburbs.map((s) => ({
-      keyword: `${keyword} ${s.name}`,
-      location_name: s.dataforseo_location_name ?? `${s.name},${s.state},Australia`,
+    const STATE_FULL: Record<string, string> = {
+      VIC: "Victoria", NSW: "New South Wales", QLD: "Queensland",
+      WA:  "Western Australia", SA: "South Australia", TAS: "Tasmania",
+      ACT: "Australian Capital Territory", NT: "Northern Territory",
+    };
+    const stateAbbr        = uniqueSuburbs[0]?.state ?? "";
+    const stateFull        = STATE_FULL[stateAbbr.toUpperCase()] ?? stateAbbr;
+    const cityLocationName = stateFull
+      ? `${city},${stateFull},Australia`
+      : `${city},Australia`;
+
+    const dfsTaskRequests: DFSTaskPostRequest[] = uniqueSuburbs.map((s) => ({
+      keyword:       `${keyword} ${s.name}`,
+      location_name: s.dataforseo_location_name ?? cityLocationName,
       language_name: "English",
-      device: "desktop",
-      os: "windows",
-      tag: `serpmap_${reportId}_${s.suburb_id}`,
+      device:        "desktop",
+      os:            "windows",
+      tag:           `serpmap_${reportId}_${s.suburb_id}`,
     }));
 
-    const postedTasks = await postLocalPackTasks(dfsTaskRequests);
+    let liveResults: Array<{ tag: string; result: import("@/lib/dataforseo").DFSTaskResult | null }>;
+    try {
+      liveResults = await getLiveResults(dfsTaskRequests);
+    } catch (err) {
+      await execute("DELETE FROM serpmap_reports WHERE report_id = $1", [reportId]);
+      const message = String(err);
+      if (message.includes("40100")) {
+        return NextResponse.json(
+          { error: "DataforSEO authentication failed. Check DATAFORSEO_LOGIN and DATAFORSEO_PASSWORD." },
+          { status: 502 }
+        );
+      }
+      throw err;
+    }
 
-    // Map taskId back to result rows by tag
+    if (liveResults.length === 0) {
+      await execute("DELETE FROM serpmap_reports WHERE report_id = $1", [reportId]);
+      return NextResponse.json(
+        { error: "DataforSEO did not return any results. Check your account access and balance." },
+        { status: 502 }
+      );
+    }
+
+    // ──────────────────────────────────────────
+    // 8. Write live results back to DB
+    // ──────────────────────────────────────────
+    let resolvedCount = 0;
     await Promise.allSettled(
-      postedTasks.map(({ tag, taskId }) => {
+      liveResults.map(({ tag, result }) => {
         const suburbId = tag.split("_").pop();
+        if (!suburbId) return Promise.resolve();
+
+        const { position, inLocalPack } = result
+          ? findBusinessRank(result, url, businessName)
+          : { position: null, inLocalPack: false };
+
+        if (position !== null) resolvedCount++;
+
         return execute(
           `UPDATE serpmap_results
-           SET dataforseo_task_id = $1, dataforseo_status = 'processing'
-           WHERE report_id = $2 AND suburb_id = $3`,
-          [taskId, reportId, suburbId]
+           SET rank_position = $1, is_in_local_pack = $2,
+               dataforseo_status = 'completed', updated_at = NOW()
+           WHERE report_id = $3 AND suburb_id = $4`,
+          [position, inLocalPack, reportId, suburbId]
         );
       })
     );
 
     // ──────────────────────────────────────────
-    // 8. Update quota counter
+    // 9. Generate AI summary & opportunity cards (live — no cache)
+    // ──────────────────────────────────────────
+    const allResults = await query<SerpMapResult>(
+      "SELECT * FROM serpmap_results WHERE report_id = $1",
+      [reportId]
+    );
+
+    const score       = calculateVisibilityScore(allResults);
+    const displayName = businessName ?? url;
+    const summary     = buildReportSummary(allResults, displayName, keyword);
+    const missed      = getTopMissedSuburbs(allResults, 5);
+
+    let summaryText = "";
+    let ctaCopy     = "";
+    let cardTexts: string[] = [];
+
+    try {
+      [summaryText, ctaCopy, cardTexts] = await Promise.all([
+        generateVisibilitySummary(summary),
+        generateCtaCopy(displayName, keyword, missed[0]?.suburb_name ?? null),
+        missed.length > 0
+          ? generateOpportunityCards(
+              displayName, keyword,
+              missed.map((s) => ({ name: s.suburb_name, volume: s.monthly_volume }))
+            )
+          : Promise.resolve([]),
+      ]);
+    } catch (aiErr) {
+      console.warn("[analyze] AI generation skipped:", aiErr);
+      summaryText = `${displayName} ranks in ${resolvedCount} of ${allResults.length} suburbs for "${keyword}".`;
+    }
+
+    // ──────────────────────────────────────────
+    // 10. Finalise report
+    // ──────────────────────────────────────────
+    await execute(
+      `UPDATE serpmap_reports
+       SET status = 'completed', visibility_score = $1, summary_text = $2, cta_copy = $3,
+           suburbs_checked = $4, completed_at = NOW()
+       WHERE report_id = $5`,
+      [score, summaryText, ctaCopy,
+       allResults.filter(r => r.dataforseo_status === "completed").length,
+       reportId]
+    );
+
+    // Insert opportunity cards (fresh — no carry-over from previous runs)
+    for (let i = 0; i < missed.length; i++) {
+      const text = cardTexts[i] ??
+        `${missed[i].suburb_name} has ${missed[i].monthly_volume} monthly searches — you are not visible here.`;
+      await execute(
+        `INSERT INTO opportunity_cards
+           (report_id, suburb_name, rank_position, monthly_volume, card_text, display_order)
+         VALUES ($1,$2,$3,$4,$5,$6)`,
+        [reportId, missed[i].suburb_name, null, missed[i].monthly_volume, text, i]
+      );
+    }
+
+    // ──────────────────────────────────────────
+    // 11. Update quota counter
     // ──────────────────────────────────────────
     await execute(
       `INSERT INTO serpmap_quota (quota_date, reports_count, api_calls_used, daily_limit, updated_at)
@@ -146,14 +251,14 @@ export async function POST(req: NextRequest) {
          SET reports_count  = serpmap_quota.reports_count + 1,
              api_calls_used = serpmap_quota.api_calls_used + $2,
              updated_at     = NOW()`,
-      [today, suburbs.length, dailyLimit]
+      [today, uniqueSuburbs.length, dailyLimit]
     );
 
     const response: AnalyzeResponse = {
       report_id: reportId,
-      status: "processing",
+      status: "completed",
       cached: false,
-      business_name: businessName ?? undefined,
+      business_name:    businessName    ?? undefined,
       business_address: businessAddress ?? undefined,
     };
 

@@ -1,20 +1,6 @@
-"use client";
-
-import { useState } from "react";
-import { useRouter } from "next/navigation";
 import InputForm from "@/components/InputForm";
-import { AnalyzeResponse } from "@/lib/types";
 
 export default function HomePage() {
-  const router = useRouter();
-  const [_pending, setPending] = useState(false);
-
-  function handleReportCreated(reportId: string, response: AnalyzeResponse) {
-    setPending(true);
-    // Navigate to the tool page with the report ID
-    router.push(`/tool?report=${reportId}&cached=${response.cached}`);
-  }
-
   return (
     <>
       {/* Hero */}
@@ -36,7 +22,7 @@ export default function HomePage() {
             renders the answer as a colour-coded visibility map — in under 60 seconds.
           </p>
 
-          <InputForm onReportCreated={handleReportCreated} />
+          <InputForm />
         </div>
       </section>
 
@@ -90,8 +76,7 @@ export default function HomePage() {
             Once you see the red suburbs on your map, you know exactly where to focus.
           </p>
           <a
-            href="#"
-            onClick={(e) => { e.preventDefault(); window.scrollTo({ top: 0, behavior: "smooth" }); }}
+            href="/"
             className="inline-block bg-brand-600 text-white font-bold px-8 py-4 rounded-xl
                        hover:bg-brand-700 transition-colors text-lg"
           >

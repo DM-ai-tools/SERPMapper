@@ -21,7 +21,6 @@ export async function getSuburbsInRadius(
     `SELECT * FROM suburb_coordinates
      WHERE lat >= $1 AND lat <= $2
        AND lng >= $3 AND lng <= $4
-       AND dataforseo_location_name IS NOT NULL
      LIMIT 100`,
     [lat - latDelta, lat + latDelta, lng - lngDelta, lng + lngDelta]
   );

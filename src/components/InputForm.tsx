@@ -1,11 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { AnalyzeRequest, AnalyzeResponse } from "@/lib/types";
-
-interface InputFormProps {
-  onReportCreated: (reportId: string, response: AnalyzeResponse) => void;
-}
+import { useRouter } from "next/navigation";
 
 const KEYWORD_SUGGESTIONS = [
   "plumber",
@@ -19,39 +15,32 @@ const KEYWORD_SUGGESTIONS = [
   "landscaper",
 ];
 
-export default function InputForm({ onReportCreated }: InputFormProps) {
+export default function InputForm() {
+  const router = useRouter();
   const [url, setUrl] = useState("");
   const [keyword, setKeyword] = useState("");
   const [city, setCity] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function handleSubmit(e: React.FormEvent) {
+  function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setError(null);
-    setLoading(true);
+    const trimmedUrl = url.trim();
+    const trimmedKeyword = keyword.trim();
+    const trimmedCity = city.trim();
 
-    try {
-      const body: AnalyzeRequest = { url, keyword, city, radius_km: 30 };
-      const res = await fetch("/api/analyze", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-
-      const data: AnalyzeResponse & { error?: string } = await res.json();
-
-      if (!res.ok) {
-        setError(data.error ?? "Something went wrong. Please try again.");
-        return;
-      }
-
-      onReportCreated(data.report_id, data);
-    } catch {
-      setError("Network error. Please check your connection and try again.");
-    } finally {
-      setLoading(false);
+    if (!trimmedUrl || !trimmedKeyword || !trimmedCity) {
+      setError("Please fill in all fields.");
+      return;
     }
+
+    setLoading(true);
+    const params = new URLSearchParams({
+      url: trimmedUrl,
+      keyword: trimmedKeyword,
+      city: trimmedCity,
+    });
+    router.push(`/tool?${params.toString()}`);
   }
 
   return (
@@ -128,7 +117,7 @@ export default function InputForm({ onReportCreated }: InputFormProps) {
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
             </svg>
-            Finding your business...
+            Loading...
           </span>
         ) : (
           "Check My Google Visibility"

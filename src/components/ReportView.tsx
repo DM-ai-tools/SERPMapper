@@ -7,6 +7,46 @@ import OpportunityCard from "./OpportunityCard";
 import EmailGate from "./EmailGate";
 import ScoreGauge from "./ScoreGauge";
 
+// ── Client-side CSV download ──────────────────────────────────
+function downloadCsv(report: SerpMapReport, results: SerpMapResult[]) {
+  const header = ["Suburb", "State", "Rank Position", "Local Pack", "Monthly Searches", "Status"];
+  const rows = [...results]
+    .sort((a, b) => {
+      if (a.rank_position !== null && b.rank_position !== null) return a.rank_position - b.rank_position;
+      if (a.rank_position !== null) return -1;
+      if (b.rank_position !== null) return 1;
+      return (b.monthly_volume || 0) - (a.monthly_volume || 0);
+    })
+    .map(r => [
+      r.suburb_name, r.suburb_state ?? "",
+      r.rank_position ?? "Not ranking",
+      r.is_in_local_pack ? "Yes" : "No",
+      r.monthly_volume || 0,
+      r.dataforseo_status,
+    ]);
+
+  const csv = [
+    [`Business`, report.business_name ?? report.business_url],
+    [`Keyword`, report.keyword],
+    [`City`, report.city],
+    [`Visibility Score`, `${report.visibility_score ?? 0}/100`],
+    [`Suburbs Checked`, `${report.suburbs_checked}/${report.suburbs_total}`],
+    [],
+    header,
+    ...rows,
+  ]
+    .map(row => row.map(c => `"${String(c).replace(/"/g, '""')}"`).join(","))
+    .join("\n");
+
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement("a");
+  a.href     = url;
+  a.download = `serpmapper-${(report.business_name ?? "report").replace(/[^a-z0-9]/gi, "-").toLowerCase()}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 // Leaflet must not SSR
 const VisibilityMap = dynamic(() => import("./VisibilityMap"), { ssr: false });
 
@@ -29,6 +69,8 @@ export default function ReportView({
   const [ctaUrl, setCtaUrl] = useState<string | null>(null);
   const [topMissedSuburb, setTopMissedSuburb] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const businessLat = toNumberOrNull(report.business_lat);
+  const businessLng = toNumberOrNull(report.business_lng);
 
   function handleUnlocked(url: string, suburb: string) {
     setCtaUrl(url);
@@ -60,32 +102,48 @@ export default function ReportView({
     <div className="w-full max-w-6xl mx-auto space-y-8">
       {/* Header row */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-black text-gray-900">
-            {report.business_name ?? new URL(report.business_url).hostname}
-          </h1>
-          <p className="text-gray-500 text-sm mt-0.5">
-            {report.keyword} · {report.city} · {report.radius_km}km radius
-          </p>
+        <div className="flex items-center gap-3">
+          <a
+            href="/"
+            className="flex items-center justify-center w-9 h-9 rounded-lg border border-gray-200
+                       bg-white hover:bg-gray-50 text-gray-500 hover:text-gray-900 transition-colors shadow-sm"
+            title="Back to home"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            </svg>
+          </a>
+          <div>
+            <h1 className="text-2xl font-black text-gray-900">
+              {report.business_name ?? new URL(report.business_url).hostname}
+            </h1>
+            <p className="text-gray-500 text-sm mt-0.5">
+              {report.keyword} · {report.city} · {report.radius_km}km radius
+            </p>
+          </div>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* CSV download — instant, no email required */}
+          <button
+            onClick={() => downloadCsv(report, results)}
+            className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg text-sm
+                       text-gray-700 hover:bg-gray-50 transition-colors"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+            </svg>
+            Download CSV
+          </button>
+
+          {/* Copy shareable link */}
           <button
             onClick={handleCopyLink}
             className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg text-sm
                        text-gray-700 hover:bg-gray-50 transition-colors"
           >
-            {copied ? (
-              <>
-                <CheckIcon />
-                Copied!
-              </>
-            ) : (
-              <>
-                <ShareIcon />
-                Share map
-              </>
-            )}
+            {copied ? <><CheckIcon />Copied!</> : <><ShareIcon />Share map</>}
           </button>
         </div>
       </div>
@@ -123,11 +181,11 @@ export default function ReportView({
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 relative">
         {/* Map */}
         <div className="lg:col-span-3 bg-white rounded-2xl shadow overflow-hidden" style={{ height: 480 }}>
-          {report.business_lat && report.business_lng ? (
+          {businessLat !== null && businessLng !== null ? (
             <VisibilityMap
               results={results}
-              businessLat={report.business_lat}
-              businessLng={report.business_lng}
+              businessLat={businessLat}
+              businessLng={businessLng}
               isPartial={isGated}
             />
           ) : (
@@ -143,6 +201,8 @@ export default function ReportView({
             <EmailGate
               reportId={report.report_id}
               visibilityScore={report.visibility_score ?? 0}
+              report={report}
+              results={results}
               onUnlocked={handleUnlocked}
             />
           ) : (
@@ -187,6 +247,12 @@ export default function ReportView({
       )}
     </div>
   );
+}
+
+function toNumberOrNull(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(n) ? n : null;
 }
 
 // ──────────────────────────────────────────────

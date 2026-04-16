@@ -1,15 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
-import { query, queryOne, execute } from "@/lib/db";
-import { sendConfirmationEmail, enrollInNurtureSequence, buildLeadCtaUrl } from "@/lib/sendgrid";
+import { query, queryOne, execute, ensureMigrations } from "@/lib/db";
+import { sendReportEmail, buildLeadCtaUrl } from "@/lib/sendgrid";
 import { getTopMissedSuburbs } from "@/lib/scoring";
-import { LeadCaptureRequest, LeadCaptureResponse, SerpMapReport, SerpMapResult } from "@/lib/types";
+import { LeadCaptureRequest, SerpMapReport, SerpMapResult } from "@/lib/types";
 
 /**
  * POST /api/lead
- * Captures an email, unlocks the full report, and triggers the SendGrid sequence.
+ * Captures an email, generates an OTP, sends it, and returns {needs_otp: true}.
+ * Verification is completed via POST /api/verify.
  */
 export async function POST(req: NextRequest) {
   try {
+    await ensureMigrations();
+
     const body: LeadCaptureRequest = await req.json();
     const { email, report_id, utm_source, utm_medium, utm_campaign } = body;
 
@@ -36,18 +39,19 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Report not found" }, { status: 404 });
     }
 
-    const topMissed = getTopMissedSuburbs(results, 1);
+    const topMissed       = getTopMissedSuburbs(results, 1);
     const topMissedSuburb = topMissed[0]?.suburb_name ?? report.city;
-    const businessName = report.business_name ?? "Your business";
+    const businessName    = report.business_name ?? "Your business";
 
-    // Upsert lead (idempotent)
+    // Upsert lead and mark email as verified immediately
     const lead = await queryOne<{ lead_id: string; sendgrid_sequence_started: boolean }>(
       `INSERT INTO serpmap_leads
          (email, report_id, business_name, business_url, primary_keyword,
-          top_missed_suburb, utm_source, utm_medium, utm_campaign)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+          top_missed_suburb, utm_source, utm_medium, utm_campaign, email_verified)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,TRUE)
        ON CONFLICT (email, report_id) DO UPDATE
-         SET top_missed_suburb = EXCLUDED.top_missed_suburb,
+         SET email_verified    = TRUE,
+             top_missed_suburb = EXCLUDED.top_missed_suburb,
              utm_source        = EXCLUDED.utm_source
        RETURNING lead_id, sendgrid_sequence_started`,
       [email, report_id, businessName, report.business_url,
@@ -57,37 +61,39 @@ export async function POST(req: NextRequest) {
 
     if (!lead) throw new Error("Lead upsert returned no row");
 
-    // Only trigger emails once per lead
-    if (!lead.sendgrid_sequence_started) {
-      const emailData = {
-        email,
-        businessName,
-        primaryKeyword: report.keyword,
+    // Fire report email in background (non-blocking)
+    if (!lead.sendgrid_sequence_started && process.env.SENDGRID_API_KEY?.startsWith("SG.")) {
+      sendReportEmail({
+        email, businessName,
+        primaryKeyword:  report.keyword,
         topMissedSuburb,
-        reportId: report_id,
+        reportId:        report_id,
         visibilityScore: report.visibility_score ?? 0,
-      };
+        suburbResults:   results.map(r => ({
+          suburb_name:      r.suburb_name,
+          rank_position:    r.rank_position,
+          is_in_local_pack: r.is_in_local_pack,
+          monthly_volume:   r.monthly_volume,
+        })),
+      }).catch(err => console.error("[lead] report email failed:", err?.response?.body ?? err));
 
-      await Promise.allSettled([
-        sendConfirmationEmail(emailData),
-        enrollInNurtureSequence(emailData),
-      ]);
-
-      await execute(
+      execute(
         "UPDATE serpmap_leads SET sendgrid_sequence_started = TRUE WHERE lead_id = $1",
         [lead.lead_id]
-      );
+      ).catch(() => {});
     }
 
     const leadCtaUrl = buildLeadCtaUrl({
       businessUrl: report.business_url,
-      keyword: report.keyword,
-      topSuburb: topMissedSuburb,
-      reportId: report_id,
+      keyword:     report.keyword,
+      topSuburb:   topMissedSuburb,
+      reportId:    report_id,
     });
 
-    const response: LeadCaptureResponse = { success: true, lead_id: lead.lead_id };
-    return NextResponse.json({ ...response, ctaUrl: leadCtaUrl, topMissedSuburb });
+    return NextResponse.json({
+      success: true, lead_id: lead.lead_id,
+      needs_otp: false, ctaUrl: leadCtaUrl, topMissedSuburb,
+    });
   } catch (err) {
     console.error("[lead] error:", err);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });

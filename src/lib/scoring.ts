@@ -13,13 +13,16 @@ import { SerpMapResult, getRankBand, RANK_WEIGHTS } from "./types";
 export function calculateVisibilityScore(results: SerpMapResult[]): number {
   if (results.length === 0) return 0;
 
-  const maxVolume = Math.max(...results.map((r) => r.monthly_volume || 0), 1);
+  const rawMaxVolume = Math.max(...results.map((r) => r.monthly_volume || 0), 0);
+  // If we have no volume data for this keyword (all zeros), fall back to
+  // equal weighting so the score still reflects ranking positions.
+  const maxVolume = rawMaxVolume === 0 ? 1 : rawMaxVolume;
 
   let weightedSum = 0;
   let totalPossible = 0;
 
   for (const result of results) {
-    const volumeWeight = (result.monthly_volume || 0) / maxVolume;
+    const volumeWeight = rawMaxVolume === 0 ? 1 : (result.monthly_volume || 0) / maxVolume;
     const rankWeight = RANK_WEIGHTS[getRankBand(result.rank_position)];
 
     weightedSum += rankWeight * volumeWeight;
