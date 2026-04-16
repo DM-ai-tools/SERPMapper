@@ -1,4 +1,4 @@
-import { createAdminClient } from "./supabase";
+import { query } from "./db";
 import { SuburbCoordinate } from "./types";
 
 /**
@@ -12,31 +12,24 @@ export async function getSuburbsInRadius(
   radiusKm: number,
   keyword: string
 ): Promise<SuburbCoordinate[]> {
-  const supabase = createAdminClient();
-
   // 1 degree of latitude ≈ 111km
   const latDelta = radiusKm / 111;
   // longitude degrees shrink with latitude
   const lngDelta = radiusKm / (111 * Math.cos((lat * Math.PI) / 180));
 
-  const { data, error } = await supabase
-    .from("suburb_coordinates")
-    .select("*")
-    .gte("lat", lat - latDelta)
-    .lte("lat", lat + latDelta)
-    .gte("lng", lng - lngDelta)
-    .lte("lng", lng + lngDelta)
-    .not("dataforseo_location_name", "is", null)
-    .limit(100); // over-fetch, then filter by exact radius
+  const rows = await query<SuburbCoordinate>(
+    `SELECT * FROM suburb_coordinates
+     WHERE lat >= $1 AND lat <= $2
+       AND lng >= $3 AND lng <= $4
+       AND dataforseo_location_name IS NOT NULL
+     LIMIT 100`,
+    [lat - latDelta, lat + latDelta, lng - lngDelta, lng + lngDelta]
+  );
 
-  if (error) throw new Error(`Supabase error: ${error.message}`);
-  if (!data || data.length === 0) return [];
+  if (rows.length === 0) return [];
 
   // Exact Haversine filter
-  const filtered = (data as SuburbCoordinate[]).filter((s) => {
-    const d = haversine(lat, lng, s.lat, s.lng);
-    return d <= radiusKm;
-  });
+  const filtered = rows.filter((s) => haversine(lat, lng, s.lat, s.lng) <= radiusKm);
 
   // Sort by search volume for the given keyword (highest-volume suburbs first)
   const volKey = `search_volume_${keyword.toLowerCase().replace(/\s+/g, "_")}` as keyof SuburbCoordinate;
@@ -46,13 +39,10 @@ export async function getSuburbsInRadius(
     return vb - va;
   });
 
-  // Cap at 60 suburbs
   return filtered.slice(0, 60);
 }
 
-/**
- * Haversine great-circle distance in kilometres.
- */
+/** Haversine great-circle distance in kilometres. */
 function haversine(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R = 6371;
   const dLat = toRad(lat2 - lat1);
@@ -78,7 +68,6 @@ export function getSuburbVolume(suburb: SuburbCoordinate, keyword: string): numb
 
 /**
  * Build a cache key from the normalised URL, keyword, and radius.
- * Uses a simple deterministic string — no crypto dependency needed client-side.
  */
 export function buildCacheKey(url: string, keyword: string, radiusKm: number): string {
   const normUrl = url

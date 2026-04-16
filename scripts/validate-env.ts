@@ -39,6 +39,8 @@ const OPTIONAL: Array<{ key: string; description: string; default?: string }> = 
   { key: "NEXT_PUBLIC_WAITLIST_URL", description: "Nav waitlist link", default: "https://dotmappers.in/waitlist" },
 ];
 
+export {};
+
 // Load .env.local if running locally
 try {
   const fs = await import("fs");

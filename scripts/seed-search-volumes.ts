@@ -27,23 +27,24 @@
  *   npx tsx scripts/seed-search-volumes.ts --mode=dataforseo
  */
 
-import { createClient } from "@supabase/supabase-js";
+import { Pool } from "pg";
+import * as path from "path";
+import * as dotenv from "dotenv";
+dotenv.config({ path: path.resolve(process.cwd(), ".env.local") });
 
 // ─────────────────────────────────────────────────────────────
 // Config
 // ─────────────────────────────────────────────────────────────
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 const DATAFORSEO_LOGIN = process.env.DATAFORSEO_LOGIN!;
 const DATAFORSEO_PASSWORD = process.env.DATAFORSEO_PASSWORD!;
 
-if (!SUPABASE_URL || !SERVICE_ROLE_KEY) {
-  console.error("Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
+if (!process.env.DATABASE_URL) {
+  console.error("Missing DATABASE_URL");
   process.exit(1);
 }
 
-const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
 // Target keywords (must match column names: search_volume_[keyword])
 const KEYWORDS = [
@@ -113,13 +114,12 @@ async function runEstimateMode() {
   const pageSize = 1000;
 
   while (true) {
-    const { data, error } = await supabase
-      .from("suburb_coordinates")
-      .select("suburb_id, name, state, population")
-      .range(from, from + pageSize - 1);
-
-    if (error) { console.error("Fetch error:", error.message); process.exit(1); }
-    if (!data || data.length === 0) break;
+    const result = await pool.query(
+      "SELECT suburb_id, name, state, population FROM suburb_coordinates LIMIT $1 OFFSET $2",
+      [pageSize, from]
+    );
+    const data: SuburbRow[] = result.rows;
+    if (data.length === 0) break;
     allSuburbs = allSuburbs.concat(data);
     if (data.length < pageSize) break;
     from += pageSize;
@@ -155,21 +155,26 @@ async function runEstimateMode() {
       return { suburb_id: suburb.suburb_id, ...volumeCols };
     });
 
-    // Supabase upsert by primary key
-    const { error } = await supabase
-      .from("suburb_coordinates")
-      .upsert(updates, { onConflict: "suburb_id" });
-
-    if (error) {
-      console.error(`Batch ${i}–${i + UPDATE_BATCH} error:`, error.message);
-    } else {
-      updated += batch.length;
-      process.stdout.write(`\rUpdated: ${updated}/${allSuburbs.length}`);
+    for (const u of updates) {
+      const cols = Object.keys(u).filter((k) => k !== "suburb_id");
+      const sets = cols.map((c, idx) => `${c} = $${idx + 2}`).join(", ");
+      const vals = cols.map((c) => (u as Record<string, unknown>)[c]);
+      try {
+        await pool.query(
+          `UPDATE suburb_coordinates SET ${sets} WHERE suburb_id = $1`,
+          [u.suburb_id, ...vals]
+        );
+      } catch (err) {
+        console.warn(`Row error for ${u.suburb_id}:`, err);
+      }
     }
+    updated += batch.length;
+    process.stdout.write(`\rUpdated: ${updated}/${allSuburbs.length}`);
   }
 
   console.log(`\n\nDone. ${updated} suburbs updated with estimated volumes.`);
   console.log("Run --mode=dataforseo later to replace with accurate DataforSEO volumes.");
+  await pool.end();
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -190,13 +195,12 @@ async function runDataforSEOMode() {
   const pageSize = 1000;
 
   while (true) {
-    const { data, error } = await supabase
-      .from("suburb_coordinates")
-      .select("suburb_id, name, state, population, dataforseo_location_name")
-      .range(from, from + pageSize - 1);
-
-    if (error) { console.error("Fetch error:", error.message); process.exit(1); }
-    if (!data || data.length === 0) break;
+    const result = await pool.query(
+      "SELECT suburb_id, name, state, population, dataforseo_location_name FROM suburb_coordinates LIMIT $1 OFFSET $2",
+      [pageSize, from]
+    );
+    const data: SuburbRow[] = result.rows;
+    if (data.length === 0) break;
     allSuburbs = allSuburbs.concat(data);
     if (data.length < pageSize) break;
     from += pageSize;
@@ -274,19 +278,21 @@ async function runDataforSEOMode() {
           });
         }
 
-        // Upsert volumes
-        const { error } = await supabase
-          .from("suburb_coordinates")
-          .upsert(updates, { onConflict: "suburb_id" });
-
-        if (error) {
-          console.warn(`  Upsert error: ${error.message}`);
-        } else {
-          totalUpdated += updates.length;
-          process.stdout.write(
-            `\r  ${keyword}: ${Math.min(i + BATCH_SIZE, allSuburbs.length)}/${allSuburbs.length} suburbs`
-          );
+        // Update volumes
+        for (const u of updates) {
+          try {
+            await pool.query(
+              `UPDATE suburb_coordinates SET "${col}" = $1 WHERE suburb_id = $2`,
+              [(u as Record<string, unknown>)[col], u.suburb_id]
+            );
+          } catch (uErr) {
+            console.warn(`  Row error:`, uErr);
+          }
         }
+        totalUpdated += updates.length;
+        process.stdout.write(
+          `\r  ${keyword}: ${Math.min(i + BATCH_SIZE, allSuburbs.length)}/${allSuburbs.length} suburbs`
+        );
       } catch (err) {
         console.warn(`  Batch error: ${err}`);
       }
@@ -298,6 +304,7 @@ async function runDataforSEOMode() {
   }
 
   console.log(`\n\nDone. ${totalUpdated} suburb×keyword volumes updated from DataforSEO.`);
+  await pool.end();
 }
 
 // ─────────────────────────────────────────────────────────────

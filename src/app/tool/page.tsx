@@ -1,14 +1,12 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import { Suspense } from "react";
-import { supabase } from "@/lib/supabase";
 import { SerpMapReport, SerpMapResult, OpportunityCard } from "@/lib/types";
 import ProcessingState from "@/components/ProcessingState";
 import ReportView from "@/components/ReportView";
 
-// Wrap in Suspense because useSearchParams needs it in App Router
 export default function ToolPage() {
   return (
     <Suspense fallback={<div className="p-20 text-center text-gray-400">Loading...</div>}>
@@ -26,6 +24,7 @@ function ToolPageInner() {
   const [results, setResults] = useState<SerpMapResult[]>([]);
   const [cards, setCards] = useState<OpportunityCard[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const esRef = useRef<EventSource | null>(null);
 
   const fetchReport = useCallback(async () => {
     if (!reportId) return;
@@ -37,86 +36,65 @@ function ToolPageInner() {
     setCards(data.cards ?? []);
   }, [reportId]);
 
-  // Initial fetch
+  // For cached reports, a single fetch is enough
   useEffect(() => {
-    fetchReport();
-  }, [fetchReport]);
+    if (isCached) fetchReport();
+  }, [isCached, fetchReport]);
 
-  // If cached, no need to subscribe to realtime — already complete
+  // For live reports, open an SSE stream that drives all updates
   useEffect(() => {
     if (!reportId || isCached) return;
 
-    // Subscribe to result inserts for this report
-    const resultsChannel = supabase
-      .channel(`results:${reportId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "serpmap_results",
-          filter: `report_id=eq.${reportId}`,
-        },
-        (payload) => {
-          setResults((prev) => {
-            // Replace pending placeholder or add new result
-            const existing = prev.findIndex(
-              (r) => r.suburb_id === (payload.new as SerpMapResult).suburb_id
-            );
-            if (existing >= 0) {
-              const updated = [...prev];
-              updated[existing] = payload.new as SerpMapResult;
-              return updated;
-            }
-            return [...prev, payload.new as SerpMapResult];
-          });
-        }
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "UPDATE",
-          schema: "public",
-          table: "serpmap_results",
-          filter: `report_id=eq.${reportId}`,
-        },
-        (payload) => {
-          setResults((prev) =>
-            prev.map((r) =>
-              r.result_id === (payload.new as SerpMapResult).result_id
-                ? (payload.new as SerpMapResult)
-                : r
-            )
-          );
-        }
-      )
-      .subscribe();
+    // Close any existing stream before opening a new one
+    esRef.current?.close();
 
-    // Subscribe to report status changes
-    const reportChannel = supabase
-      .channel(`report:${reportId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "UPDATE",
-          schema: "public",
-          table: "serpmap_reports",
-          filter: `report_id=eq.${reportId}`,
-        },
-        (payload) => {
-          setReport(payload.new as SerpMapReport);
-          // When completed, fetch cards and final data
-          if ((payload.new as SerpMapReport).status === "completed") {
-            fetchReport();
-          }
-        }
-      )
-      .subscribe();
+    const es = new EventSource(`/api/stream/${reportId}`);
+    esRef.current = es;
 
-    return () => {
-      supabase.removeChannel(resultsChannel);
-      supabase.removeChannel(reportChannel);
-    };
+    // Initial snapshot of the report
+    es.addEventListener("report", (e) => {
+      const r = JSON.parse(e.data) as SerpMapReport;
+      setReport(r);
+    });
+
+    // A single suburb result arrived
+    es.addEventListener("result", (e) => {
+      const incoming = JSON.parse(e.data) as SerpMapResult;
+      setResults((prev) => {
+        const idx = prev.findIndex(
+          (r) => r.suburb_id === incoming.suburb_id || r.result_id === incoming.result_id
+        );
+        if (idx >= 0) {
+          const updated = [...prev];
+          updated[idx] = incoming;
+          return updated;
+        }
+        return [...prev, incoming];
+      });
+    });
+
+    // Processing fully complete
+    es.addEventListener("complete", (e) => {
+      const data = JSON.parse(e.data);
+      setReport(data.report);
+      setResults(data.results ?? []);
+      setCards(data.cards ?? []);
+      es.close();
+    });
+
+    // Timed out — refresh to check if partial data is available
+    es.addEventListener("timeout", () => {
+      es.close();
+      fetchReport();
+    });
+
+    es.addEventListener("error", () => {
+      es.close();
+      // Fallback: try polling the report API once
+      fetchReport();
+    });
+
+    return () => es.close();
   }, [reportId, isCached, fetchReport]);
 
   if (!reportId) {
@@ -144,7 +122,6 @@ function ToolPageInner() {
   const isPartial = report?.status === "partial";
   const isComplete = report?.status === "completed";
 
-  // Show processing spinner until we have a partial or complete report
   if (isProcessing) {
     const checked = results.filter(
       (r) => r.dataforseo_status === "completed" || r.rank_position !== null
@@ -162,7 +139,6 @@ function ToolPageInner() {
 
   if (!report) return null;
 
-  // Show gated partial report or full report
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
       <ReportView

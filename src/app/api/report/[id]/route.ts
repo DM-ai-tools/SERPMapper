@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase";
+import { query, queryOne } from "@/lib/db";
+import { SerpMapReport, SerpMapResult, OpportunityCard } from "@/lib/types";
 
 /**
  * GET /api/report/[id]
  * Returns the full report with results and opportunity cards.
- * Used by shared report pages and polling during processing.
  */
 export async function GET(
   _req: NextRequest,
@@ -13,29 +13,24 @@ export async function GET(
   const { id } = params;
   if (!id) return NextResponse.json({ error: "Report ID required" }, { status: 400 });
 
-  const supabase = createAdminClient();
-
-  const [reportRes, resultsRes, cardsRes] = await Promise.all([
-    supabase.from("serpmap_reports").select("*").eq("report_id", id).single(),
-    supabase
-      .from("serpmap_results")
-      .select("*")
-      .eq("report_id", id)
-      .order("monthly_volume", { ascending: false }),
-    supabase
-      .from("opportunity_cards")
-      .select("*")
-      .eq("report_id", id)
-      .order("display_order", { ascending: true }),
+  const [report, results, cards] = await Promise.all([
+    queryOne<SerpMapReport>(
+      "SELECT * FROM serpmap_reports WHERE report_id = $1",
+      [id]
+    ),
+    query<SerpMapResult>(
+      "SELECT * FROM serpmap_results WHERE report_id = $1 ORDER BY monthly_volume DESC",
+      [id]
+    ),
+    query<OpportunityCard>(
+      "SELECT * FROM opportunity_cards WHERE report_id = $1 ORDER BY display_order ASC",
+      [id]
+    ),
   ]);
 
-  if (reportRes.error || !reportRes.data) {
+  if (!report) {
     return NextResponse.json({ error: "Report not found" }, { status: 404 });
   }
 
-  return NextResponse.json({
-    report: reportRes.data,
-    results: resultsRes.data ?? [],
-    cards: cardsRes.data ?? [],
-  });
+  return NextResponse.json({ report, results, cards });
 }

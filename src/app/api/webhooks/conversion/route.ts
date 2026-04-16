@@ -1,19 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase";
+import { execute, query } from "@/lib/db";
 
 /**
  * POST /api/webhooks/conversion
  *
- * Called by any future DotMappers product (e.g. via Stripe webhook)
- * when a SERPMapper lead converts to a paying customer.
- *
- * This endpoint is NOT dependent on any product existing — it simply
- * updates the serpmap_leads table to record the conversion for attribution.
- *
- * Expected body: { report_id?: string, email?: string }
+ * Called by any future DotMappers product when a SERPMapper lead converts.
  * Auth: x-webhook-secret header must match WEBHOOK_SECRET env var.
- *
- * Set the same WEBHOOK_SECRET in both SERPMapper and the converting product.
  */
 export async function POST(req: NextRequest) {
   const secret = req.headers.get("x-webhook-secret");
@@ -37,30 +29,38 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const supabase = createAdminClient();
+  try {
+    let sql: string;
+    let params: unknown[];
 
-  let query = supabase
-    .from("serpmap_leads")
-    .update({
-      product_trial_started: true,
-      product_trial_started_at: new Date().toISOString(),
-    });
+    if (report_id && email) {
+      sql = `UPDATE serpmap_leads
+             SET product_trial_started = TRUE, product_trial_started_at = NOW()
+             WHERE report_id = $1 OR email = $2`;
+      params = [report_id, email];
+    } else if (report_id) {
+      sql = `UPDATE serpmap_leads
+             SET product_trial_started = TRUE, product_trial_started_at = NOW()
+             WHERE report_id = $1`;
+      params = [report_id];
+    } else {
+      sql = `UPDATE serpmap_leads
+             SET product_trial_started = TRUE, product_trial_started_at = NOW()
+             WHERE email = $1`;
+      params = [email!];
+    }
 
-  // Filter by report_id, email, or both
-  if (report_id && email) {
-    query = query.or(`report_id.eq.${report_id},email.eq.${email}`);
-  } else if (report_id) {
-    query = query.eq("report_id", report_id);
-  } else if (email) {
-    query = query.eq("email", email);
-  }
+    await execute(sql, params);
 
-  const { error, count } = await query;
+    // Count affected rows
+    const rows = await query<{ count: string }>(
+      "SELECT COUNT(*) FROM serpmap_leads WHERE product_trial_started = TRUE AND product_trial_started_at > NOW() - INTERVAL '5 seconds'"
+    );
+    const updated = parseInt(rows[0]?.count ?? "0", 10);
 
-  if (error) {
-    console.error("[conversion webhook] update failed:", error.message);
+    return NextResponse.json({ success: true, updated });
+  } catch (err) {
+    console.error("[conversion webhook] update failed:", err);
     return NextResponse.json({ error: "Update failed" }, { status: 500 });
   }
-
-  return NextResponse.json({ success: true, updated: count ?? 0 });
 }

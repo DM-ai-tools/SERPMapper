@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase";
+import { query, queryOne, execute, insertReturning } from "@/lib/db";
 import { resolveBusinessFromUrl } from "@/lib/places";
 import { getSuburbsInRadius, buildCacheKey, getSuburbVolume } from "@/lib/suburbs";
 import { postLocalPackTasks } from "@/lib/dataforseo";
 import { AnalyzeRequest, AnalyzeResponse } from "@/lib/types";
 
-export const maxDuration = 60; // Vercel Pro allows up to 60s for API routes
+export const maxDuration = 60;
 
 export async function POST(req: NextRequest) {
   try {
@@ -19,17 +19,14 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const supabase = createAdminClient();
-
     // ──────────────────────────────────────────
     // 1. Daily quota guard
     // ──────────────────────────────────────────
     const today = new Date().toISOString().split("T")[0];
-    const { data: quota } = await supabase
-      .from("serpmap_quota")
-      .select("reports_count, daily_limit")
-      .eq("quota_date", today)
-      .single();
+    const quota = await queryOne<{ reports_count: number; daily_limit: number }>(
+      "SELECT reports_count, daily_limit FROM serpmap_quota WHERE quota_date = $1",
+      [today]
+    );
 
     const dailyLimit = Number(process.env.DAILY_REPORT_QUOTA ?? 200);
     if (quota && quota.reports_count >= (quota.daily_limit ?? dailyLimit)) {
@@ -40,15 +37,13 @@ export async function POST(req: NextRequest) {
     }
 
     // ──────────────────────────────────────────
-    // 2. Cache check — same business+keyword+radius within 7 days
+    // 2. Cache check
     // ──────────────────────────────────────────
     const cacheKey = buildCacheKey(url, keyword, radius_km);
-    const { data: cached } = await supabase
-      .from("serpmap_cache_index")
-      .select("report_id, expires_at")
-      .eq("cache_key", cacheKey)
-      .gt("expires_at", new Date().toISOString())
-      .single();
+    const cached = await queryOne<{ report_id: string }>(
+      "SELECT report_id FROM serpmap_cache_index WHERE cache_key = $1 AND expires_at > NOW()",
+      [cacheKey]
+    );
 
     if (cached) {
       const response: AnalyzeResponse = {
@@ -63,8 +58,6 @@ export async function POST(req: NextRequest) {
     // 3. Resolve business address from URL
     // ──────────────────────────────────────────
     const business = await resolveBusinessFromUrl(url, city);
-
-    // If Places API fails, use city geocoding as fallback
     const businessLat = business?.lat ?? null;
     const businessLng = business?.lng ?? null;
     const businessName = business?.name ?? null;
@@ -72,10 +65,7 @@ export async function POST(req: NextRequest) {
 
     if (!businessLat || !businessLng) {
       return NextResponse.json(
-        {
-          error:
-            "Could not locate this business. Please check the URL or try entering the suburb manually.",
-        },
+        { error: "Could not locate this business. Please check the URL or try entering the suburb manually." },
         { status: 422 }
       );
     }
@@ -95,47 +85,29 @@ export async function POST(req: NextRequest) {
     // ──────────────────────────────────────────
     // 5. Create report record
     // ──────────────────────────────────────────
-    const { data: report, error: reportError } = await supabase
-      .from("serpmap_reports")
-      .insert({
-        business_url: url,
-        business_name: businessName,
-        keyword,
-        city,
-        business_lat: businessLat,
-        business_lng: businessLng,
-        business_address: businessAddress,
-        radius_km,
-        status: "processing",
-        suburbs_total: suburbs.length,
-        cache_key: cacheKey,
-      })
-      .select("report_id")
-      .single();
+    const report = await insertReturning<{ report_id: string }>(
+      `INSERT INTO serpmap_reports
+         (business_url, business_name, keyword, city, business_lat, business_lng,
+          business_address, radius_km, status, suburbs_total, cache_key)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'processing',$9,$10)
+       RETURNING report_id`,
+      [url, businessName, keyword, city, businessLat, businessLng,
+       businessAddress, radius_km, suburbs.length, cacheKey]
+    );
 
-    if (reportError || !report) {
-      throw new Error(`Failed to create report: ${reportError?.message}`);
-    }
-
-    const reportId = report.report_id as string;
+    const reportId = report.report_id;
 
     // ──────────────────────────────────────────
     // 6. Create result placeholder rows
     // ──────────────────────────────────────────
-    const resultRows = suburbs.map((s) => ({
-      report_id: reportId,
-      suburb_id: s.suburb_id,
-      suburb_name: s.name,
-      suburb_state: s.state,
-      monthly_volume: getSuburbVolume(s, keyword),
-      dataforseo_status: "pending" as const,
-    }));
-
-    const { error: resultsError } = await supabase
-      .from("serpmap_results")
-      .insert(resultRows);
-
-    if (resultsError) throw new Error(`Failed to insert result rows: ${resultsError.message}`);
+    for (const s of suburbs) {
+      await execute(
+        `INSERT INTO serpmap_results
+           (report_id, suburb_id, suburb_name, suburb_state, monthly_volume, dataforseo_status)
+         VALUES ($1,$2,$3,$4,$5,'pending')`,
+        [reportId, s.suburb_id, s.name, s.state, getSuburbVolume(s, keyword)]
+      );
+    }
 
     // ──────────────────────────────────────────
     // 7. Batch post DataforSEO tasks
@@ -152,27 +124,30 @@ export async function POST(req: NextRequest) {
     const postedTasks = await postLocalPackTasks(dfsTaskRequests);
 
     // Map taskId back to result rows by tag
-    const taskUpdatePromises = postedTasks.map(async ({ tag, taskId }) => {
-      const suburbId = tag.split("_").pop();
-      return supabase
-        .from("serpmap_results")
-        .update({ dataforseo_task_id: taskId, dataforseo_status: "processing" })
-        .eq("report_id", reportId)
-        .eq("suburb_id", suburbId);
-    });
-
-    await Promise.allSettled(taskUpdatePromises);
+    await Promise.allSettled(
+      postedTasks.map(({ tag, taskId }) => {
+        const suburbId = tag.split("_").pop();
+        return execute(
+          `UPDATE serpmap_results
+           SET dataforseo_task_id = $1, dataforseo_status = 'processing'
+           WHERE report_id = $2 AND suburb_id = $3`,
+          [taskId, reportId, suburbId]
+        );
+      })
+    );
 
     // ──────────────────────────────────────────
     // 8. Update quota counter
     // ──────────────────────────────────────────
-    await supabase.from("serpmap_quota").upsert({
-      quota_date: today,
-      reports_count: (quota?.reports_count ?? 0) + 1,
-      api_calls_used: (quota?.reports_count ?? 0) + suburbs.length,
-      daily_limit: dailyLimit,
-      updated_at: new Date().toISOString(),
-    });
+    await execute(
+      `INSERT INTO serpmap_quota (quota_date, reports_count, api_calls_used, daily_limit, updated_at)
+       VALUES ($1, 1, $2, $3, NOW())
+       ON CONFLICT (quota_date) DO UPDATE
+         SET reports_count  = serpmap_quota.reports_count + 1,
+             api_calls_used = serpmap_quota.api_calls_used + $2,
+             updated_at     = NOW()`,
+      [today, suburbs.length, dailyLimit]
+    );
 
     const response: AnalyzeResponse = {
       report_id: reportId,
@@ -185,9 +160,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(response);
   } catch (err) {
     console.error("[analyze] error:", err);
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

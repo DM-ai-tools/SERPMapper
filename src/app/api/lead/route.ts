@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase";
+import { query, queryOne, execute } from "@/lib/db";
 import { sendConfirmationEmail, enrollInNurtureSequence, buildLeadCtaUrl } from "@/lib/sendgrid";
 import { getTopMissedSuburbs } from "@/lib/scoring";
-import { LeadCaptureRequest, LeadCaptureResponse } from "@/lib/types";
+import { LeadCaptureRequest, LeadCaptureResponse, SerpMapReport, SerpMapResult } from "@/lib/types";
 
 /**
  * POST /api/lead
@@ -17,53 +17,45 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "email and report_id are required" }, { status: 400 });
     }
 
-    // Basic email validation
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return NextResponse.json({ error: "Invalid email address" }, { status: 400 });
     }
 
-    const supabase = createAdminClient();
-
-    // Get report + results for lead enrichment
-    const [reportRes, resultsRes] = await Promise.all([
-      supabase.from("serpmap_reports").select("*").eq("report_id", report_id).single(),
-      supabase.from("serpmap_results").select("*").eq("report_id", report_id),
+    const [report, results] = await Promise.all([
+      queryOne<SerpMapReport>(
+        "SELECT * FROM serpmap_reports WHERE report_id = $1",
+        [report_id]
+      ),
+      query<SerpMapResult>(
+        "SELECT * FROM serpmap_results WHERE report_id = $1",
+        [report_id]
+      ),
     ]);
 
-    if (reportRes.error || !reportRes.data) {
+    if (!report) {
       return NextResponse.json({ error: "Report not found" }, { status: 404 });
     }
-
-    const report = reportRes.data;
-    const results = resultsRes.data ?? [];
 
     const topMissed = getTopMissedSuburbs(results, 1);
     const topMissedSuburb = topMissed[0]?.suburb_name ?? report.city;
     const businessName = report.business_name ?? "Your business";
 
-    // Upsert lead (idempotent — same email + report_id is safe to re-submit)
-    const { data: lead, error: leadError } = await supabase
-      .from("serpmap_leads")
-      .upsert(
-        {
-          email,
-          report_id,
-          business_name: businessName,
-          business_url: report.business_url,
-          primary_keyword: report.keyword,
-          top_missed_suburb: topMissedSuburb,
-          utm_source: utm_source ?? "direct",
-          utm_medium: utm_medium ?? null,
-          utm_campaign: utm_campaign ?? null,
-        },
-        { onConflict: "email,report_id", ignoreDuplicates: false }
-      )
-      .select("lead_id, sendgrid_sequence_started")
-      .single();
+    // Upsert lead (idempotent)
+    const lead = await queryOne<{ lead_id: string; sendgrid_sequence_started: boolean }>(
+      `INSERT INTO serpmap_leads
+         (email, report_id, business_name, business_url, primary_keyword,
+          top_missed_suburb, utm_source, utm_medium, utm_campaign)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+       ON CONFLICT (email, report_id) DO UPDATE
+         SET top_missed_suburb = EXCLUDED.top_missed_suburb,
+             utm_source        = EXCLUDED.utm_source
+       RETURNING lead_id, sendgrid_sequence_started`,
+      [email, report_id, businessName, report.business_url,
+       report.keyword, topMissedSuburb,
+       utm_source ?? "direct", utm_medium ?? null, utm_campaign ?? null]
+    );
 
-    if (leadError || !lead) {
-      throw new Error(`Lead upsert failed: ${leadError?.message}`);
-    }
+    if (!lead) throw new Error("Lead upsert returned no row");
 
     // Only trigger emails once per lead
     if (!lead.sendgrid_sequence_started) {
@@ -81,10 +73,10 @@ export async function POST(req: NextRequest) {
         enrollInNurtureSequence(emailData),
       ]);
 
-      await supabase
-        .from("serpmap_leads")
-        .update({ sendgrid_sequence_started: true })
-        .eq("lead_id", lead.lead_id);
+      await execute(
+        "UPDATE serpmap_leads SET sendgrid_sequence_started = TRUE WHERE lead_id = $1",
+        [lead.lead_id]
+      );
     }
 
     const leadCtaUrl = buildLeadCtaUrl({
@@ -94,11 +86,7 @@ export async function POST(req: NextRequest) {
       reportId: report_id,
     });
 
-    const response: LeadCaptureResponse = {
-      success: true,
-      lead_id: lead.lead_id,
-    };
-
+    const response: LeadCaptureResponse = { success: true, lead_id: lead.lead_id };
     return NextResponse.json({ ...response, ctaUrl: leadCtaUrl, topMissedSuburb });
   } catch (err) {
     console.error("[lead] error:", err);
