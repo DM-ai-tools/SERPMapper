@@ -7,7 +7,7 @@ interface Props {
 
 export default function OpportunityCard({ card, rank }: Props) {
   return (
-    <div className="bg-white border border-red-100 rounded-xl p-4 shadow-sm hover:shadow-md transition-shadow">
+    <div className="rounded-xl border border-red-100/90 bg-white p-4 shadow-sm transition-all duration-200 hover:border-red-200 hover:shadow-md">
       <div className="flex items-start gap-3">
         {/* Rank badge */}
         {rank && (

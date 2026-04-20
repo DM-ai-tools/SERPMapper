@@ -11,7 +11,8 @@ import {
 import { calculateVisibilityScore, getTopMissedSuburbs, buildReportSummary } from "@/lib/scoring";
 import { AnalyzeRequest, AnalyzeResponse, SerpMapResult } from "@/lib/types";
 
-export const maxDuration = 60;
+/** DataforSEO runs one request per suburb — allow enough time for ~60 suburbs. */
+export const maxDuration = 300;
 
 export async function POST(req: NextRequest) {
   try {
@@ -25,6 +26,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         { error: "url, keyword, and city are required" },
         { status: 400 }
+      );
+    }
+
+    if (!process.env.DATABASE_URL?.trim()) {
+      return NextResponse.json(
+        { error: "Database is not configured (DATABASE_URL missing)." },
+        { status: 503 }
       );
     }
 
@@ -48,15 +56,29 @@ export async function POST(req: NextRequest) {
     // 2. Delete any previous reports for the same url+keyword+city
     //    so every search is always fresh — no stale data is ever reused
     // ──────────────────────────────────────────
+    let business;
+    try {
+      business = await resolveBusinessFromUrl(url, city);
+    } catch (placesErr) {
+      const msg = placesErr instanceof Error ? placesErr.message : String(placesErr);
+      console.error("[analyze] Google Places error:", placesErr);
+      return NextResponse.json(
+        {
+          error: "Google Places could not complete the lookup.",
+          detail: msg,
+        },
+        { status: 502 }
+      );
+    }
+
+    const businessUrlForReport =
+      business?.websiteUri?.trim() ? business.websiteUri.trim() : url;
+
     await execute(
       "DELETE FROM serpmap_reports WHERE business_url = $1 AND keyword = $2 AND city = $3",
-      [url, keyword, city]
+      [businessUrlForReport, keyword, city]
     ).catch(() => {}); // non-critical — don't fail the whole request if this errors
 
-    // ──────────────────────────────────────────
-    // 3. Resolve business address from URL (live Google Places lookup)
-    // ──────────────────────────────────────────
-    const business = await resolveBusinessFromUrl(url, city);
     const businessLat     = business?.lat ?? null;
     const businessLng     = business?.lng ?? null;
     const businessName    = business?.name ?? null;
@@ -64,7 +86,10 @@ export async function POST(req: NextRequest) {
 
     if (!businessLat || !businessLng) {
       return NextResponse.json(
-        { error: "Could not locate this business. Please check the URL or try entering the suburb manually." },
+        {
+          error:
+            "We could not match your website to a Google Business Profile. Use the exact website URL shown on your Google listing, and check that your city matches the listing.",
+        },
         { status: 422 }
       );
     }
@@ -95,7 +120,7 @@ export async function POST(req: NextRequest) {
           business_address, radius_km, status, suburbs_total)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'processing',$9)
        RETURNING report_id`,
-      [url, businessName, keyword, city, businessLat, businessLng,
+      [businessUrlForReport, businessName, keyword, city, businessLat, businessLng,
        businessAddress, radius_km, uniqueSuburbs.length]
     );
     const reportId = report.report_id;
@@ -139,7 +164,7 @@ export async function POST(req: NextRequest) {
     try {
       liveResults = await getLiveResults(dfsTaskRequests);
     } catch (err) {
-      await execute("DELETE FROM serpmap_reports WHERE report_id = $1", [reportId]);
+      await execute("DELETE FROM serpmap_reports WHERE report_id = $1", [reportId]).catch(() => {});
       const message = String(err);
       if (message.includes("40100")) {
         return NextResponse.json(
@@ -147,7 +172,14 @@ export async function POST(req: NextRequest) {
           { status: 502 }
         );
       }
-      throw err;
+      console.error("[analyze] DataforSEO error:", err);
+      return NextResponse.json(
+        {
+          error: "DataforSEO request failed.",
+          detail: message.slice(0, 400),
+        },
+        { status: 502 }
+      );
     }
 
     if (liveResults.length === 0) {
@@ -168,7 +200,7 @@ export async function POST(req: NextRequest) {
         if (!suburbId) return Promise.resolve();
 
         const { position, inLocalPack } = result
-          ? findBusinessRank(result, url, businessName)
+          ? findBusinessRank(result, businessUrlForReport, businessName)
           : { position: null, inLocalPack: false };
 
         if (position !== null) resolvedCount++;
@@ -192,7 +224,7 @@ export async function POST(req: NextRequest) {
     );
 
     const score       = calculateVisibilityScore(allResults);
-    const displayName = businessName ?? url;
+    const displayName = businessName ?? businessUrlForReport;
     const summary     = buildReportSummary(allResults, displayName, keyword);
     const missed      = getTopMissedSuburbs(allResults, 5);
 
@@ -265,6 +297,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(response);
   } catch (err) {
     console.error("[analyze] error:", err);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    const detail = err instanceof Error ? err.message : String(err);
+    return NextResponse.json(
+      {
+        error: "Internal server error",
+        ...(process.env.NODE_ENV === "development" ? { detail } : {}),
+      },
+      { status: 500 }
+    );
   }
 }

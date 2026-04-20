@@ -71,14 +71,14 @@ export default function TermsPage() {
         <section>
           <h2 className="text-xl font-bold text-gray-900">8. Contact</h2>
           <p className="mt-2">
-            For questions regarding these terms, contact DotMappers IT Pvt Ltd via{" "}
+            For questions regarding these terms, contact Traffic Radius via{" "}
             <a
-              href="https://dotmappers.in"
+              href="https://trafficradius.com.au/"
               target="_blank"
               rel="noopener noreferrer"
               className="text-brand-600 hover:text-brand-700"
             >
-              dotmappers.in
+              trafficradius.com.au
             </a>
             .
           </p>

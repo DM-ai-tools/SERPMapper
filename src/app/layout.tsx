@@ -1,5 +1,11 @@
 import type { Metadata } from "next";
+import { Plus_Jakarta_Sans } from "next/font/google";
 import "./globals.css";
+
+const sans = Plus_Jakarta_Sans({
+  subsets: ["latin"],
+  display: "swap",
+});
 
 export const metadata: Metadata = {
   title: "SERPMapper — Local Search Visibility Heat Map",
@@ -37,51 +43,83 @@ export default function RootLayout({
       <head>
         {/* Leaflet CSS loaded via globals.css import */}
       </head>
-      <body className="min-h-screen bg-gray-50">
-        <header className="border-b border-gray-200 bg-white/90 backdrop-blur sticky top-0 z-50">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-14 flex items-center justify-between">
-            <a href="/" className="flex items-center gap-2 font-black text-lg text-gray-900">
-              <span className="text-brand-600">SERPMapper</span>
+      <body
+        className={`${sans.className} min-h-screen flex flex-col antialiased text-slate-900 bg-[var(--page-bg)]`}
+      >
+        <header className="sticky top-0 z-50 border-b border-slate-200/80 bg-white/75 backdrop-blur-md supports-[backdrop-filter]:bg-white/65 shadow-sm shadow-slate-900/[0.04]">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-14 md:h-16 flex items-center justify-between gap-3">
+            <a
+              href="/"
+              className="flex items-center gap-2 group"
+              aria-label="SERPMapper home"
+            >
+              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-brand-500 to-brand-700 text-white shadow-md shadow-brand-600/25 ring-1 ring-white/20">
+                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" aria-hidden>
+                  <path
+                    d="M12 3L4 8v8l8 5 8-5V8l-8-5z"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeLinejoin="round"
+                  />
+                  <path
+                    d="M12 12v9M12 12L4 7.5M12 12l8-4.5"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              </span>
+              <span className="font-extrabold text-lg tracking-tight text-slate-900 group-hover:text-brand-700 transition-colors">
+                SERP<span className="text-brand-600">Mapper</span>
+              </span>
             </a>
-            <nav className="hidden md:flex items-center gap-6 text-sm text-gray-600">
-              <a href="/#how-it-works" className="hover:text-gray-900 transition-colors">
-                How it works
-              </a>
-              <a href="/blog" className="hover:text-gray-900 transition-colors">
-                Blog
-              </a>
+
+            <div className="flex items-center gap-2 sm:gap-3">
+              <nav className="hidden md:flex items-center gap-1 lg:gap-2 text-sm">
+                <a href="/#how-it-works" className="nav-link-underline px-3 py-2 rounded-lg">
+                  How it works
+                </a>
+                <a href="/blog" className="nav-link-underline px-3 py-2 rounded-lg">
+                  Blog
+                </a>
+              </nav>
               <a
-                href="https://dotmappers.in/book"
+                href="https://googleads.trafficradius.com.au/"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="bg-brand-600 text-white font-semibold px-4 py-1.5 rounded-lg
-                           hover:bg-brand-700 transition-colors"
+                className="inline-flex items-center justify-center rounded-xl bg-gradient-to-b from-brand-500 to-brand-700 px-3.5 py-2 md:px-4 md:py-2.5 text-xs md:text-sm font-semibold text-white shadow-md shadow-brand-600/30 ring-1 ring-white/15 transition-all duration-200 hover:shadow-lg hover:shadow-brand-600/35 hover:-translate-y-0.5 active:translate-y-0 whitespace-nowrap"
               >
-                Book a Free Call
+                Strategic call
               </a>
-            </nav>
+            </div>
           </div>
         </header>
 
-        <main className="flex-1">{children}</main>
+        <main className="flex-1 w-full">{children}</main>
 
-        <footer className="border-t border-gray-200 bg-white mt-20 py-10">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center text-sm text-gray-400">
+        <footer className="mt-auto border-t border-slate-200/90 bg-white/80 backdrop-blur-sm">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 text-center text-sm text-slate-500">
             <p>
               SERPMapper is a free tool by{" "}
               <a
-                href="https://dotmappers.in"
-                className="text-brand-600 hover:text-brand-700"
+                href="https://trafficradius.com.au/"
+                className="font-medium text-brand-600 hover:text-brand-700 underline decoration-brand-200 underline-offset-4 hover:decoration-brand-400 transition-colors"
                 target="_blank"
                 rel="noopener noreferrer"
               >
-                DotMappers IT Pvt Ltd
+                Traffic radius
               </a>
             </p>
-            <p className="mt-1">
-              <a href="/privacy" className="hover:text-gray-600">Privacy</a>
-              {" · "}
-              <a href="/terms" className="hover:text-gray-600">Terms</a>
+            <p className="mt-3 flex items-center justify-center gap-3 text-xs text-slate-400">
+              <a href="/privacy" className="hover:text-slate-700 transition-colors">
+                Privacy
+              </a>
+              <span className="text-slate-300" aria-hidden>
+                ·
+              </span>
+              <a href="/terms" className="hover:text-slate-700 transition-colors">
+                Terms
+              </a>
             </p>
           </div>
         </footer>

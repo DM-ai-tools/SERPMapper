@@ -14,9 +14,21 @@ type Phase = "analyzing" | "gated" | "unlocked";
 
 export default function ToolPage() {
   return (
-    <Suspense fallback={<div className="p-20 text-center text-gray-400">Loading…</div>}>
+    <Suspense fallback={<ToolPageSuspenseFallback />}>
       <ToolPageInner />
     </Suspense>
+  );
+}
+
+function ToolPageSuspenseFallback() {
+  return (
+    <div className="min-h-[50vh] flex flex-col items-center justify-center px-4 py-20 bg-[var(--page-bg)]">
+      <div className="w-full max-w-sm space-y-4">
+        <div className="h-10 rounded-xl bg-slate-200/80 animate-pulse" />
+        <div className="h-4 rounded-lg bg-slate-100 animate-pulse w-2/3 mx-auto" />
+        <p className="text-center text-sm text-slate-500">Preparing analysis…</p>
+      </div>
+    </div>
   );
 }
 
@@ -171,9 +183,29 @@ function ToolPageInner() {
   // ── Error state ───────────────────────────────────────────────
   if (error) {
     return (
-      <div className="max-w-lg mx-auto py-20 text-center space-y-4">
-        <p className="text-red-600 font-medium">{error}</p>
-        <a href="/" className="text-brand-600 hover:underline text-sm">Try again</a>
+      <div className="min-h-[50vh] flex items-center justify-center px-4 py-16 bg-[var(--page-bg)]">
+        <div className="card-elevated max-w-md w-full p-8 text-center space-y-5">
+          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-red-50 text-red-600 ring-1 ring-red-100">
+            <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+              />
+            </svg>
+          </div>
+          <div>
+            <p className="text-lg font-semibold text-slate-900">Something went wrong</p>
+            <p className="mt-2 text-sm text-red-700/90 leading-relaxed">{error}</p>
+          </div>
+          <a
+            href="/"
+            className="inline-flex items-center justify-center rounded-xl bg-brand-600 px-5 py-2.5 text-sm font-semibold text-white shadow-md shadow-brand-600/25 transition hover:bg-brand-700"
+          >
+            Back to home
+          </a>
+        </div>
       </div>
     );
   }
@@ -196,7 +228,7 @@ function ToolPageInner() {
 
   // ── Phase: unlocked (full report) ───────────────────────────
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 md:py-12 bg-[var(--page-bg)] min-h-[calc(100vh-3.5rem)]">
       <ReportView
         report={report}
         results={results}

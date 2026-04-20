@@ -99,14 +99,14 @@ export default function ReportView({
       `&source=serpmap&report=${report.report_id}`;
 
   return (
-    <div className="w-full max-w-6xl mx-auto space-y-8">
+    <div className="w-full max-w-6xl mx-auto space-y-8 md:space-y-10">
       {/* Header row */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <a
             href="/"
-            className="flex items-center justify-center w-9 h-9 rounded-lg border border-gray-200
-                       bg-white hover:bg-gray-50 text-gray-500 hover:text-gray-900 transition-colors shadow-sm"
+            className="flex items-center justify-center w-10 h-10 rounded-xl border border-slate-200/90
+                       bg-white hover:bg-slate-50 text-slate-500 hover:text-slate-900 transition-all shadow-sm hover:shadow-md"
             title="Back to home"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -114,11 +114,11 @@ export default function ReportView({
             </svg>
           </a>
           <div>
-            <h1 className="text-2xl font-black text-gray-900">
+            <h1 className="text-xl md:text-2xl font-extrabold text-slate-900 tracking-tight">
               {report.business_name ?? new URL(report.business_url).hostname}
             </h1>
-            <p className="text-gray-500 text-sm mt-0.5">
-              {report.keyword} · {report.city} · {report.radius_km}km radius
+            <p className="text-slate-500 text-sm mt-1">
+              {report.keyword} · {report.city} · {report.radius_km} km radius
             </p>
           </div>
         </div>
@@ -127,8 +127,8 @@ export default function ReportView({
           {/* CSV download — instant, no email required */}
           <button
             onClick={() => downloadCsv(report, results)}
-            className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg text-sm
-                       text-gray-700 hover:bg-gray-50 transition-colors"
+            className="flex items-center gap-2 px-4 py-2.5 border border-slate-200 rounded-xl text-sm font-medium
+                       text-slate-700 bg-white hover:bg-slate-50 hover:border-slate-300 transition-all shadow-sm"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -140,8 +140,8 @@ export default function ReportView({
           {/* Copy shareable link */}
           <button
             onClick={handleCopyLink}
-            className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg text-sm
-                       text-gray-700 hover:bg-gray-50 transition-colors"
+            className="flex items-center gap-2 px-4 py-2.5 border border-slate-200 rounded-xl text-sm font-medium
+                       text-slate-700 bg-white hover:bg-slate-50 hover:border-slate-300 transition-all shadow-sm"
           >
             {copied ? <><CheckIcon />Copied!</> : <><ShareIcon />Share map</>}
           </button>
@@ -150,14 +150,14 @@ export default function ReportView({
 
       {/* Score + summary */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="bg-white rounded-2xl shadow p-6 flex flex-col items-center justify-center">
+        <div className="card-elevated p-6 flex flex-col items-center justify-center">
           <ScoreGauge score={report.visibility_score ?? 0} />
-          <p className="text-sm text-gray-500 mt-2 text-center">Visibility Score</p>
+          <p className="text-sm font-medium text-slate-500 mt-3 text-center">Visibility score</p>
         </div>
 
-        <div className="md:col-span-2 bg-white rounded-2xl shadow p-6 space-y-3">
-          <h2 className="font-semibold text-gray-900">Your Visibility Summary</h2>
-          <p className="text-gray-600 leading-relaxed text-sm">
+        <div className="md:col-span-2 card-elevated p-6 md:p-8 space-y-4">
+          <h2 className="font-bold text-slate-900 text-lg">Your visibility summary</h2>
+          <p className="text-slate-600 leading-relaxed text-sm">
             {report.summary_text ?? "Analysis complete. See your map for suburb-by-suburb results."}
           </p>
           <div className="flex gap-3 text-sm flex-wrap">
@@ -180,7 +180,10 @@ export default function ReportView({
       {/* Map + gate / opportunity panel */}
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 relative">
         {/* Map */}
-        <div className="lg:col-span-3 bg-white rounded-2xl shadow overflow-hidden" style={{ height: 480 }}>
+        <div
+          className="lg:col-span-3 card-elevated overflow-hidden ring-1 ring-slate-200/80"
+          style={{ height: 480 }}
+        >
           {businessLat !== null && businessLng !== null ? (
             <VisibilityMap
               results={results}
@@ -207,7 +210,7 @@ export default function ReportView({
             />
           ) : (
             <>
-              <h2 className="font-bold text-gray-900 text-lg">Top Missed Opportunities</h2>
+              <h2 className="font-bold text-slate-900 text-lg">Top missed opportunities</h2>
               {cards.length > 0 ? (
                 <div className="space-y-3">
                   {cards.map((card, i) => (
@@ -219,20 +222,24 @@ export default function ReportView({
               )}
 
               {/* CTA card — destination controlled by NEXT_PUBLIC_LEAD_CTA_BASE_URL env var */}
-              <div className="bg-gradient-to-br from-brand-600 to-brand-700 rounded-2xl p-6 text-white space-y-3">
-                <p className="font-semibold text-lg leading-snug">
+              <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-brand-600 via-brand-600 to-brand-800 p-6 text-white space-y-4 shadow-lg shadow-brand-900/20 ring-1 ring-white/10">
+                <div
+                  className="pointer-events-none absolute -right-12 -top-12 h-40 w-40 rounded-full bg-white/10 blur-2xl"
+                  aria-hidden
+                />
+                <p className="relative font-semibold text-lg leading-snug">
                   {report.cta_copy ?? `Want to start ranking in these suburbs? Get a free visibility strategy call.`}
                 </p>
                 <a
                   href={finalCtaUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="block w-full bg-white text-brand-700 font-bold text-center py-3
-                             rounded-xl hover:bg-brand-50 transition-colors"
+                  className="relative block w-full bg-white text-brand-700 font-bold text-center py-3.5
+                             rounded-xl shadow-md hover:bg-brand-50 transition-colors"
                 >
-                  Book a Free Strategy Call
+                  Book a free strategy call
                 </a>
-                <p className="text-xs text-brand-100 text-center">
+                <p className="relative text-xs text-brand-100/95 text-center">
                   Free 15-min call. No obligation.
                 </p>
               </div>
@@ -261,9 +268,9 @@ function toNumberOrNull(value: unknown): number | null {
 
 function Stat({ value, label }: { value: string; label: string }) {
   return (
-    <div className="bg-gray-50 rounded-lg px-3 py-2 text-center">
-      <div className="text-lg font-bold text-gray-900">{value}</div>
-      <div className="text-xs text-gray-500">{label}</div>
+    <div className="rounded-xl border border-slate-100 bg-slate-50/80 px-3 py-2.5 text-center">
+      <div className="text-lg font-bold text-slate-900">{value}</div>
+      <div className="text-xs text-slate-500">{label}</div>
     </div>
   );
 }
@@ -274,13 +281,13 @@ function SuburbTable({ results }: { results: SerpMapResult[] }) {
   );
 
   return (
-    <div className="bg-white rounded-2xl shadow overflow-hidden">
-      <div className="px-6 py-4 border-b border-gray-100">
-        <h2 className="font-bold text-gray-900">All Suburbs</h2>
+    <div className="card-elevated overflow-hidden">
+      <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50">
+        <h2 className="font-bold text-slate-900">All suburbs</h2>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
-          <thead className="bg-gray-50 text-gray-500 text-xs uppercase tracking-wide">
+          <thead className="bg-slate-50/90 text-slate-500 text-xs uppercase tracking-wide">
             <tr>
               <th className="px-4 py-3 text-left">Suburb</th>
               <th className="px-4 py-3 text-left">State</th>
@@ -293,7 +300,7 @@ function SuburbTable({ results }: { results: SerpMapResult[] }) {
             {sorted.map((r) => {
               const { band } = getBandInfo(r.rank_position);
               return (
-                <tr key={r.result_id} className="hover:bg-gray-50 transition-colors">
+                <tr key={r.result_id} className="hover:bg-slate-50/80 transition-colors">
                   <td className="px-4 py-3 font-medium text-gray-900">{r.suburb_name}</td>
                   <td className="px-4 py-3 text-gray-500">{r.suburb_state ?? "—"}</td>
                   <td className="px-4 py-3 text-right text-gray-700">

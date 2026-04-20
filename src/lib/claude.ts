@@ -33,6 +33,8 @@ export async function generateVisibilitySummary(
 Be specific, use their business name and keyword, and keep it to 2-3 sentences.
 Tone: direct, empathetic, data-driven. No marketing fluff.
 
+CRITICAL: Use ONLY the businessName value from the JSON below as the client's name. Do not substitute "Traffic Radius", "DotMappers", "SERPMapper", or any other agency or tool name as if it were this business.
+
 Business data:
 ${JSON.stringify(input, null, 2)}
 
@@ -70,6 +72,7 @@ export async function generateOpportunityCards(
 Be specific: name the suburb, mention the search volume, frame it as a missed opportunity.
 Tone: concrete, motivating, no hype.
 
+Use ONLY this business name (do not replace it with Traffic Radius, DotMappers, SERPMapper, or any other name):
 Business: ${businessName}
 Keyword: ${keyword}
 Missed suburbs:
@@ -102,7 +105,7 @@ export async function generateCtaCopy(
   const client = getClient();
 
   const prompt = `Write a single, compelling CTA sentence encouraging a local business owner to improve their Google Maps visibility.
-Use the business name, keyword, and suburb. Be specific and direct.
+Use ONLY the business name below (never Traffic Radius, DotMappers, or SERPMapper as the client's name). Use the keyword and suburb. Be specific and direct.
 Max 20 words. No exclamation marks. No markdown. No asterisks.
 
 Business: ${businessName}

@@ -120,16 +120,20 @@ export default function ProcessingState({
   const getHexColor = (idx: number) => HEX_COLORS[idx % (HEX_COLORS.length - 1)];
 
   return (
-    <div className="min-h-[calc(100vh-56px)] flex items-center justify-center px-4 py-10 bg-gradient-to-br from-gray-50 to-white">
-      <div className="w-full max-w-5xl grid grid-cols-1 lg:grid-cols-2 gap-10 items-start">
+    <div className="relative min-h-[calc(100vh-3.5rem)] md:min-h-[calc(100vh-4rem)] flex items-center justify-center px-4 py-10 bg-mesh-hero bg-grid-faint">
+      <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-white/40 to-transparent" aria-hidden />
+      <div className="relative w-full max-w-5xl grid grid-cols-1 lg:grid-cols-2 gap-10 lg:gap-12 items-start">
         {/* LEFT — Progress info */}
         <div className="space-y-6">
           <div>
-            <div className="inline-flex items-center gap-2 bg-brand-50 text-brand-700 rounded-full px-3 py-1 text-xs font-semibold mb-3">
-              <span className="w-1.5 h-1.5 rounded-full bg-brand-500 animate-pulse" />
+            <div className="inline-flex items-center gap-2 rounded-full border border-brand-200/80 bg-white/90 px-3 py-1.5 text-xs font-semibold text-brand-800 shadow-sm backdrop-blur-sm mb-3">
+              <span className="relative flex h-2 w-2">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-brand-400 opacity-50" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-brand-500" />
+              </span>
               Scanning now
             </div>
-            <h2 className="text-2xl font-black text-gray-900 leading-snug">
+            <h2 className="text-2xl md:text-3xl font-extrabold text-slate-900 leading-snug tracking-tight">
               {businessName ? (
                 <>
                   Checking <span className="text-brand-600">{businessName}</span>
@@ -145,11 +149,13 @@ export default function ProcessingState({
 
           {/* Progress bar */}
           <div className="space-y-1.5">
-            <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden">
+            <div className="relative h-3 overflow-hidden rounded-full bg-slate-200/90 ring-1 ring-slate-200/80">
               <div
-                className="h-full bg-brand-500 rounded-full transition-all duration-500 ease-out"
+                className="relative h-full overflow-hidden rounded-full bg-gradient-to-r from-brand-500 to-brand-600 transition-[width] duration-500 ease-out shadow-sm"
                 style={{ width: `${pct}%` }}
-              />
+              >
+                <div className="pointer-events-none absolute inset-0 w-full animate-shimmer bg-gradient-to-r from-transparent via-white/25 to-transparent" />
+              </div>
             </div>
             <div className="flex justify-between text-xs text-gray-400">
               <span>
@@ -191,16 +197,22 @@ export default function ProcessingState({
         </div>
 
         {/* RIGHT — Hex preview (tied to real checked count) */}
-        <div className="bg-white rounded-2xl border border-gray-200 shadow-lg overflow-hidden">
-          <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
-            <span className="text-sm font-semibold text-gray-700">Live Map Preview</span>
-            <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-red-500 bg-red-50 px-2.5 py-1 rounded-full">
-              <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
-              LIVE
+        <div className="card-elevated overflow-hidden ring-1 ring-slate-200/60">
+          <div className="relative flex items-center justify-between px-4 py-3.5 border-b border-slate-100 bg-gradient-to-r from-slate-50/90 to-white">
+            <span className="text-sm font-semibold text-slate-800">Live map preview</span>
+            <span
+              className="inline-flex items-center gap-1.5 rounded-full border border-red-200/90 bg-red-50 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide text-red-600 shadow-sm animate-border-glow"
+              style={{ boxShadow: "0 0 0 1px rgba(239, 68, 68, 0.12)" }}
+            >
+              <span className="relative flex h-2 w-2">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-400 opacity-60" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-red-500" />
+              </span>
+              Live
             </span>
           </div>
 
-          <div className="p-6 flex flex-col items-center gap-0.5 bg-gray-50 min-h-[260px] justify-center">
+          <div className="p-6 flex flex-col items-center gap-0.5 bg-slate-50/80 min-h-[260px] justify-center">
             {Array.from({ length: HEX_ROWS }, (_, rowIdx) => (
               <div
                 key={rowIdx}

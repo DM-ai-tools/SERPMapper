@@ -4,41 +4,79 @@ export default function HomePage() {
   return (
     <>
       {/* Hero */}
-      <section className="bg-gradient-to-b from-white to-gray-50 py-20 px-4">
-        <div className="max-w-4xl mx-auto text-center space-y-6">
-          <div className="inline-flex items-center gap-2 bg-brand-50 text-brand-700 rounded-full px-4 py-1.5 text-sm font-semibold">
-            <span className="w-2 h-2 rounded-full bg-brand-500 animate-pulse" />
-            Free · No signup · Results in 60 seconds
+      <section className="relative overflow-hidden bg-mesh-hero py-20 md:py-28 px-4">
+        <div
+          className="pointer-events-none absolute inset-0 bg-grid-faint opacity-40"
+          aria-hidden
+        />
+        <div className="relative max-w-4xl mx-auto text-center space-y-8 md:space-y-10">
+          <div
+            className="inline-flex items-center gap-2 rounded-full border border-brand-200/80 bg-white/80 px-4 py-2 text-sm font-semibold text-brand-800 shadow-sm backdrop-blur-sm animate-fadeIn"
+          >
+            <span
+              className="relative flex h-2 w-2"
+              aria-hidden
+            >
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-brand-400 opacity-60" />
+              <span className="relative inline-flex h-2 w-2 rounded-full bg-brand-500" />
+            </span>
+            Free · No signup · Results in ~60 seconds
           </div>
 
-          <h1 className="text-5xl md:text-6xl font-black text-gray-900 leading-tight tracking-tight">
-            Can people in your city
-            <br />
-            <span className="text-brand-600">find you on Google?</span>
-          </h1>
+          <div className="space-y-5 animate-fadeIn [animation-delay:80ms] [animation-fill-mode:both]">
+            <h1 className="text-4xl sm:text-5xl md:text-6xl font-extrabold text-slate-900 leading-[1.08] tracking-tight">
+              Can people in your city
+              <br />
+              <span className="bg-gradient-to-r from-brand-600 via-brand-500 to-brand-700 bg-clip-text text-transparent">
+                find you on Google?
+              </span>
+            </h1>
 
-          <p className="text-xl text-gray-600 max-w-2xl mx-auto leading-relaxed">
-            SERPMapper checks your Google Maps rankings across every suburb in your city and
-            renders the answer as a colour-coded visibility map — in under 60 seconds.
-          </p>
+            <p className="text-lg sm:text-xl text-slate-600 max-w-2xl mx-auto leading-relaxed">
+              SERPMapper checks your Google Maps rankings across suburbs in your area and
+              maps them as a colour-coded visibility grid — fast, clear, and actionable.
+            </p>
+          </div>
 
-          <InputForm />
+          <div className="animate-fadeIn [animation-delay:140ms] [animation-fill-mode:both]">
+            <InputForm />
+          </div>
         </div>
       </section>
 
       {/* How it works */}
-      <section id="how-it-works" className="py-20 px-4 bg-white">
+      <section
+        id="how-it-works"
+        className="relative py-20 md:py-24 px-4 bg-mesh-section border-y border-slate-100/90"
+      >
         <div className="max-w-5xl mx-auto">
-          <h2 className="text-3xl font-black text-gray-900 text-center mb-12">How it works</h2>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-            {STEPS.map((step) => (
-              <div key={step.number} className="text-center space-y-3">
-                <div className="w-12 h-12 rounded-2xl bg-brand-100 text-brand-700 font-black text-xl
-                                flex items-center justify-center mx-auto">
+          <div className="text-center mb-14 md:mb-16">
+            <p className="text-sm font-semibold uppercase tracking-wider text-brand-600 mb-2">
+              Simple workflow
+            </p>
+            <h2 className="text-3xl md:text-4xl font-extrabold text-slate-900 tracking-tight">
+              How it works
+            </h2>
+            <p className="mt-3 text-slate-600 max-w-xl mx-auto">
+              Three steps from URL to a suburb-level picture of where you show up in local search.
+            </p>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 md:gap-8">
+            {STEPS.map((step, i) => (
+              <div
+                key={step.number}
+                className="group relative rounded-2xl border border-slate-200/90 bg-white p-8 text-center shadow-card transition-all duration-300
+                           hover:border-brand-200 hover:shadow-card-lg hover:-translate-y-1"
+                style={{ animationDelay: `${i * 60}ms` }}
+              >
+                <div
+                  className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-brand-500 to-brand-700 text-xl font-extrabold text-white shadow-lg shadow-brand-600/25
+                             ring-4 ring-brand-50 transition-transform duration-300 group-hover:scale-105"
+                >
                   {step.number}
                 </div>
-                <h3 className="font-bold text-gray-900">{step.title}</h3>
-                <p className="text-sm text-gray-500 leading-relaxed">{step.description}</p>
+                <h3 className="font-bold text-slate-900 text-lg">{step.title}</h3>
+                <p className="mt-3 text-sm text-slate-600 leading-relaxed">{step.description}</p>
               </div>
             ))}
           </div>
@@ -46,18 +84,28 @@ export default function HomePage() {
       </section>
 
       {/* Colour legend explainer */}
-      <section className="py-16 px-4 bg-gray-50">
-        <div className="max-w-3xl mx-auto text-center space-y-8">
-          <h2 className="text-2xl font-black text-gray-900">What the colours mean</h2>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <section className="py-16 md:py-20 px-4 bg-[var(--page-bg)]">
+        <div className="max-w-4xl mx-auto text-center space-y-10">
+          <div>
+            <h2 className="text-2xl md:text-3xl font-extrabold text-slate-900 tracking-tight">
+              What the colours mean
+            </h2>
+            <p className="mt-2 text-slate-600 text-sm md:text-base">
+              Same legend on the map — green is winning, red is a gap worth fixing.
+            </p>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-5">
             {COLOUR_LEGEND.map((item) => (
-              <div key={item.label} className="bg-white rounded-xl p-4 shadow-sm space-y-2">
+              <div
+                key={item.label}
+                className="rounded-2xl border border-slate-200/90 bg-white p-5 shadow-card transition-shadow hover:shadow-card-lg"
+              >
                 <div
-                  className="w-8 h-8 rounded-lg mx-auto"
+                  className="mx-auto mb-3 h-10 w-10 rounded-xl shadow-inner ring-2 ring-white"
                   style={{ backgroundColor: item.color }}
                 />
-                <p className="font-semibold text-sm text-gray-900">{item.label}</p>
-                <p className="text-xs text-gray-500">{item.description}</p>
+                <p className="font-bold text-sm text-slate-900">{item.label}</p>
+                <p className="mt-2 text-xs text-slate-500 leading-relaxed">{item.description}</p>
               </div>
             ))}
           </div>
@@ -65,20 +113,19 @@ export default function HomePage() {
       </section>
 
       {/* Social proof / stats */}
-      <section className="py-20 px-4 bg-white">
-        <div className="max-w-4xl mx-auto text-center space-y-6">
-          <h2 className="text-3xl font-black text-gray-900">
-            The average AU local business is invisible in{" "}
-            <span className="text-red-500">60% of their suburbs</span>
+      <section className="py-20 md:py-24 px-4 bg-white border-t border-slate-100">
+        <div className="max-w-3xl mx-auto text-center space-y-8">
+          <h2 className="text-2xl md:text-3xl font-extrabold text-slate-900 leading-snug">
+            Most local businesses are invisible in{" "}
+            <span className="text-red-500">a majority of nearby suburbs</span>
           </h2>
-          <p className="text-gray-600 max-w-2xl mx-auto">
-            Most business owners assume they rank well locally. SERPMapper reveals the gaps.
-            Once you see the red suburbs on your map, you know exactly where to focus.
+          <p className="text-slate-600 leading-relaxed">
+            Owners often assume they rank well everywhere. SERPMapper shows the gaps — so you
+            know exactly where local demand is going to competitors.
           </p>
           <a
             href="/"
-            className="inline-block bg-brand-600 text-white font-bold px-8 py-4 rounded-xl
-                       hover:bg-brand-700 transition-colors text-lg"
+            className="btn-primary-live inline-flex items-center justify-center px-8 py-4 text-base rounded-xl"
           >
             Check my visibility — free
           </a>
@@ -93,19 +140,19 @@ const STEPS = [
     number: "1",
     title: "Enter your details",
     description:
-      "Paste your business website URL, type your main service keyword (e.g. plumber), and your city.",
+      "Paste your business website URL, your main service keyword (e.g. plumber), and your city.",
   },
   {
     number: "2",
-    title: "We check 50 suburbs",
+    title: "We scan suburbs",
     description:
-      "SERPMapper checks your Google Maps ranking in up to 50 suburbs around you. Takes 20–40 seconds.",
+      "We check your Google Maps visibility across many suburbs around your business — typically within 20–40 seconds.",
   },
   {
     number: "3",
-    title: "See your visibility map",
+    title: "See your map",
     description:
-      "Get a colour-coded suburb map, a Visibility Score out of 100, and a ranked list of missed opportunities.",
+      "Get a colour-coded map, a Visibility Score out of 100, and a ranked list of missed opportunities.",
   },
 ];
 

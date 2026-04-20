@@ -3,11 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev -p 3000",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "verify-places": "node scripts/verify-google-places.mjs",
+    "smoke-analyze": "node scripts/smoke-analyze.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.36.3",
