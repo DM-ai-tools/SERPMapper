@@ -4,8 +4,12 @@
  * VisibilityMap — Leaflet heat-map of suburb-level Google Maps rankings.
  *
  * Rendering strategy (priority order):
- *  1. GeoJSON polygon  — from suburb_coordinates.geojson_polygon via /api/suburb-geo
- *  2. Circle marker    — fallback when polygon hasn't loaded yet (during streaming)
+ *  1. GeoJSON polygon — from suburb_coordinates.geojson_polygon via /api/suburb-geo (requires ABS GeoJSON seed)
+ *  2. Leaflet Circle  — geographic radius in metres when no polygon (scales with zoom like the basemap)
+ *
+ * We do NOT use pixel-based CircleMarkers for the final layer: they keep a fixed *screen* size, so zooming
+ * in makes dots look tiny relative to the map (and zooming out makes them look huge). Metre-based circles
+ * behave like approximate suburb footprints until real boundaries exist in the DB.
  *
  * The parent MUST render this component with:
  *   const VisibilityMap = dynamic(() => import("./VisibilityMap"), { ssr: false })
@@ -43,7 +47,10 @@ interface VisibilityMapProps {
 
 type LayerHandle =
   | import("leaflet").GeoJSON
-  | import("leaflet").CircleMarker;
+  | import("leaflet").Circle;
+
+/** Approximate suburb footprint when `geojson_polygon` is NULL (typical for lat/lng-only seeds). */
+const FALLBACK_SUBURB_RADIUS_METERS = 2200;
 
 // ─────────────────────────────────────────────────────────────
 // Helper: build tooltip HTML for a suburb result
@@ -93,10 +100,8 @@ export default function VisibilityMap({
   // Always holds the latest results so map-init callback can render them
   const resultsRef = useRef<SerpMapResult[]>(results);
   const isPartialRef = useRef(isPartial);
-  // Maps result_id → Leaflet layer (GeoJSON polygon or CircleMarker fallback)
+  // Maps result_id → Leaflet layer (GeoJSON polygon or metre-based Circle fallback)
   const layersRef = useRef<Map<string, LayerHandle>>(new Map());
-  // Tracks which suburb_ids already have their polygon loaded
-  const polygonLoadedRef = useRef<Set<string>>(new Set());
 
   // ── Fetch GeoJSON polygons for a batch of suburb_ids ─────────
   const fetchPolygons = useCallback(
@@ -137,52 +142,38 @@ export default function VisibilityMap({
     (currentResults: SerpMapResult[], partial: boolean) => {
       if (!mapInstanceRef.current || !L) return;
 
-      const map = mapInstanceRef.current;
       const displayResults = partial ? currentResults.slice(0, 10) : currentResults;
-      const suburbIdsToFetch: string[] = [];
 
+      // 1) Update colours for layers we already have (rank may change during streaming)
       for (const result of displayResults) {
         const band = getRankBand(result.rank_position);
         const color = RANK_COLORS[band];
         const existing = layersRef.current.get(result.result_id);
-
         if (existing) {
           (existing as import("leaflet").Path).setStyle(polygonStyle(color));
-        } else {
-          const circle = L!.circleMarker([businessLat, businessLng], {
-            radius: 10,
-            ...polygonStyle(color, 1),
-          });
-          circle.bindTooltip(tooltipHtml(result), {
-            sticky: true,
-            opacity: 1,
-            className: "serp-tooltip",
-          });
-          circle.addTo(map);
-          layersRef.current.set(result.result_id, circle);
-
-          if (result.suburb_id && !polygonLoadedRef.current.has(result.suburb_id)) {
-            suburbIdsToFetch.push(result.suburb_id);
-            polygonLoadedRef.current.add(result.suburb_id);
-          }
         }
       }
 
-      if (suburbIdsToFetch.length === 0) return;
+      // 2) Fetch coordinates / polygons only for results not yet drawn (never use business lat/lng as placeholder)
+      const pending = displayResults.filter(
+        (r) => r.suburb_id && !layersRef.current.has(r.result_id)
+      );
+      if (pending.length === 0) return;
+
+      const suburbIdsToFetch = Array.from(new Set(pending.map((r) => r.suburb_id!)));
 
       fetchPolygons(suburbIdsToFetch).then((geoMap) => {
         if (!mapInstanceRef.current || !L) return;
 
-        for (const result of displayResults) {
+        for (const result of pending) {
           if (!result.suburb_id) continue;
+          if (layersRef.current.has(result.result_id)) continue;
+
           const geo = geoMap[result.suburb_id];
           if (!geo) continue;
 
           const band = getRankBand(result.rank_position);
           const color = RANK_COLORS[band];
-
-          const placeholder = layersRef.current.get(result.result_id);
-          if (placeholder) mapInstanceRef.current.removeLayer(placeholder);
 
           if (geo.polygon) {
             const geoLayer = L!.geoJSON(geo.polygon as GeoJSON.Geometry, {
@@ -204,8 +195,8 @@ export default function VisibilityMap({
             geoLayer.addTo(mapInstanceRef.current);
             layersRef.current.set(result.result_id, geoLayer);
           } else if (geo.lat !== undefined && geo.lng !== undefined) {
-            const circle = L!.circleMarker([geo.lat, geo.lng], {
-              radius: 10,
+            const circle = L!.circle([geo.lat, geo.lng], {
+              radius: FALLBACK_SUBURB_RADIUS_METERS,
               ...polygonStyle(color, 1),
             });
             circle.bindTooltip(tooltipHtml(result), {
@@ -219,9 +210,7 @@ export default function VisibilityMap({
         }
       });
     },
-    // businessLat/Lng are stable (map re-mounts if they change via key prop)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [fetchPolygons, businessLat, businessLng]
+    [fetchPolygons]
   );
 
   // ── Keep refs in sync with latest props ──────────────────────
@@ -290,7 +279,6 @@ export default function VisibilityMap({
       mapInstanceRef.current?.remove();
       mapInstanceRef.current = null;
       layersRef.current.clear();
-      polygonLoadedRef.current.clear();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
