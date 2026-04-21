@@ -21,14 +21,26 @@ export async function POST(req: NextRequest) {
 
     // Build a parameterised IN clause: ($1,$2,$3,...)
     const placeholders = ids.map((_, i) => `$${i + 1}`).join(",");
-    const rows = await query<{ suburb_id: string; lat: number; lng: number; geojson_polygon: unknown }>(
+    const rows = await query<{ suburb_id: string; lat: unknown; lng: unknown; geojson_polygon: unknown }>(
       `SELECT suburb_id, lat, lng, geojson_polygon
        FROM suburb_coordinates
        WHERE suburb_id IN (${placeholders})`,
       ids
     );
 
-    return NextResponse.json(rows, {
+    // pg often returns DECIMAL columns as strings — Leaflet needs real numbers for geographic circles
+    const normalized = rows.map((r) => {
+      const lat = typeof r.lat === "number" ? r.lat : Number(r.lat);
+      const lng = typeof r.lng === "number" ? r.lng : Number(r.lng);
+      return {
+        suburb_id: r.suburb_id,
+        lat: Number.isFinite(lat) ? lat : null,
+        lng: Number.isFinite(lng) ? lng : null,
+        geojson_polygon: r.geojson_polygon,
+      };
+    });
+
+    return NextResponse.json(normalized, {
       headers: {
         "Cache-Control": "public, max-age=3600, s-maxage=3600",
       },

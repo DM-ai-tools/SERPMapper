@@ -194,8 +194,11 @@ export default function VisibilityMap({
             });
             geoLayer.addTo(mapInstanceRef.current);
             layersRef.current.set(result.result_id, geoLayer);
-          } else if (geo.lat !== undefined && geo.lng !== undefined) {
-            const circle = L!.circle([geo.lat, geo.lng], {
+          } else if (geo.lat != null && geo.lng != null) {
+            const lat = Number(geo.lat);
+            const lng = Number(geo.lng);
+            if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+            const circle = L!.circle([lat, lng], {
               radius: FALLBACK_SUBURB_RADIUS_METERS,
               ...polygonStyle(color, 1),
             });
@@ -208,6 +211,12 @@ export default function VisibilityMap({
             layersRef.current.set(result.result_id, circle);
           }
         }
+
+        mapInstanceRef.current.invalidateSize();
+        layersRef.current.forEach((layer) => {
+          const path = layer as import("leaflet").Path & { redraw?: () => void };
+          if (typeof path.redraw === "function") path.redraw();
+        });
       });
     },
     [fetchPolygons]
@@ -244,6 +253,20 @@ export default function VisibilityMap({
         zoom: 11,
         zoomControl: true,
         attributionControl: true,
+      });
+
+      /** Geographic circles/polygons must redraw when zoom changes (fixes edge cases in flex layouts). */
+      const redrawOverlayPaths = () => {
+        layersRef.current.forEach((layer) => {
+          const path = layer as import("leaflet").Path & { redraw?: () => void };
+          if (typeof path.redraw === "function") path.redraw();
+        });
+      };
+      map.on("zoomend", redrawOverlayPaths);
+
+      map.whenReady(() => {
+        map.invalidateSize();
+        redrawOverlayPaths();
       });
 
       L.tileLayer(
@@ -347,7 +370,7 @@ function MapLegend() {
   ).map((band) => ({ band, color: RANK_COLORS[band], label: RANK_LABELS[band] }));
 
   return (
-    <div className="absolute bottom-4 left-4 bg-white rounded-xl shadow-lg p-3 text-xs space-y-1.5 z-[1000]">
+    <div className="absolute bottom-4 left-4 bg-white rounded-xl shadow-lg p-3 text-xs space-y-1.5 z-[1000] max-w-[220px]">
       {entries.map(({ band, color, label }) => (
         <div key={band} className="flex items-center gap-2">
           <span
@@ -357,6 +380,10 @@ function MapLegend() {
           <span className="text-gray-700 font-medium">{label}</span>
         </div>
       ))}
+      <p className="text-[10px] text-gray-500 leading-snug pt-1 border-t border-gray-100 mt-1">
+        Areas: real suburb outlines when <code className="text-[9px] bg-gray-100 px-0.5 rounded">geojson_polygon</code>{" "}
+        is in the database (ABS seed). Otherwise ~2.2 km circles — size follows the map when you zoom.
+      </p>
     </div>
   );
 }
