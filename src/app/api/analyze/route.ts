@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { query, queryOne, execute, insertReturning } from "@/lib/db";
+import { query, queryOne, execute, insertReturning, ensureDatabaseReady } from "@/lib/db";
 import { resolveBusinessFromUrl } from "@/lib/places";
 import { fetchLiveSuburbVolumes, getSuburbsInRadius } from "@/lib/suburbs";
 import { getLiveResults, findBusinessRank, DFSTaskPostRequest } from "@/lib/dataforseo";
@@ -35,6 +35,8 @@ export async function POST(req: NextRequest) {
         { status: 503 }
       );
     }
+
+    await ensureDatabaseReady();
 
     // ──────────────────────────────────────────
     // 1. Daily quota guard

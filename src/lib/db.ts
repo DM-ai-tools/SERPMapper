@@ -1,3 +1,5 @@
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { Pool } from "pg";
 
 // Singleton pool — reused across hot-reloads in dev
@@ -6,7 +8,12 @@ declare global {
   var _pgPool: Pool | undefined;
 }
 
-// Migration promise — ensures the ALTER TABLE completes before any route uses the columns
+declare global {
+  // eslint-disable-next-line no-var
+  var _pgCoreSchema: Promise<void> | undefined;
+}
+
+// Migration promise — OTP columns after core schema exists
 declare global {
   // eslint-disable-next-line no-var
   var _pgMigration: Promise<void> | undefined;
@@ -29,8 +36,54 @@ export function getPool(): Pool {
   return global._pgPool;
 }
 
-/** Awaitable — call at the top of any route that uses the OTP columns. */
-export async function ensureMigrations(): Promise<void> {
+/** Find migrations/ when cwd is repo root or nested (e.g. monorepo). */
+function resolveMigrationsDir(): string {
+  const candidates = [
+    join(process.cwd(), "migrations"),
+    join(process.cwd(), "serpmapper", "migrations"),
+  ];
+  for (const dir of candidates) {
+    if (existsSync(join(dir, "postgres_schema.sql"))) return dir;
+  }
+  return join(process.cwd(), "migrations");
+}
+
+/**
+ * Apply core DDL from migrations/postgres_schema.sql (idempotent).
+ * Required on fresh hosts (e.g. Railway Postgres) where tables were never created.
+ */
+async function ensureCoreSchema(): Promise<void> {
+  if (global._pgCoreSchema) return global._pgCoreSchema;
+
+  global._pgCoreSchema = (async () => {
+    const dir = resolveMigrationsDir();
+    const main = join(dir, "postgres_schema.sql");
+    if (!existsSync(main)) {
+      throw new Error(
+        `Database bootstrap: missing ${main}. Deploy the migrations folder with your app.`
+      );
+    }
+    let sql = readFileSync(main, "utf8");
+    const volCache = join(dir, "003_keyword_volume_cache.sql");
+    if (existsSync(volCache)) {
+      sql += "\n\n" + readFileSync(volCache, "utf8");
+    }
+    sql += `
+ALTER TABLE suburb_coordinates ADD COLUMN IF NOT EXISTS search_volumes JSONB DEFAULT '{}'::jsonb;
+ALTER TABLE serpmap_reports ADD COLUMN IF NOT EXISTS maps_search_query TEXT;
+`;
+    await getPool().query(sql);
+  })();
+
+  return global._pgCoreSchema;
+}
+
+/**
+ * Ensure tables exist (fresh DB) and optional column upgrades (OTP on leads).
+ * Call after confirming DATABASE_URL is set, before other queries.
+ */
+export async function ensureDatabaseReady(): Promise<void> {
+  await ensureCoreSchema();
   if (!global._pgMigration) {
     global._pgMigration = (async () => {
       try {
@@ -41,11 +94,16 @@ export async function ensureMigrations(): Promise<void> {
             ADD COLUMN IF NOT EXISTS email_verified  BOOLEAN DEFAULT FALSE
         `);
       } catch {
-        // Table may not exist yet on a fresh install — ignore
+        // Non-fatal if table missing in odd edge cases
       }
     })();
   }
   return global._pgMigration;
+}
+
+/** @deprecated Use ensureDatabaseReady — same behavior */
+export async function ensureMigrations(): Promise<void> {
+  return ensureDatabaseReady();
 }
 
 /** Run a SELECT and return all rows. */

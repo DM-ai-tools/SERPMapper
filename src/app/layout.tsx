@@ -31,6 +31,9 @@ export const metadata: Metadata = {
     title: "SERPMapper — Local Search Visibility Heat Map",
     description: "See exactly which suburbs you rank in on Google Maps — free.",
   },
+  icons: {
+    icon: "/Traffic-Radius-Logo.webp",
+  },
 };
 
 export default function RootLayout({
