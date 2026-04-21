@@ -7,46 +7,7 @@ import OpportunityCard from "./OpportunityCard";
 import EmailGate from "./EmailGate";
 import ScoreGauge from "./ScoreGauge";
 import { isVisiblePosition } from "@/lib/scoring";
-
-// ── Client-side CSV download ──────────────────────────────────
-function downloadCsv(report: SerpMapReport, results: SerpMapResult[]) {
-  const header = ["Suburb", "State", "Rank Position", "Local Pack", "Monthly Searches", "Status"];
-  const rows = [...results]
-    .sort((a, b) => {
-      if (a.rank_position !== null && b.rank_position !== null) return a.rank_position - b.rank_position;
-      if (a.rank_position !== null) return -1;
-      if (b.rank_position !== null) return 1;
-      return (b.monthly_volume || 0) - (a.monthly_volume || 0);
-    })
-    .map(r => [
-      r.suburb_name, r.suburb_state ?? "",
-      r.rank_position ?? "Not ranking",
-      r.is_in_local_pack ? "Yes" : "No",
-      r.monthly_volume || 0,
-      r.dataforseo_status,
-    ]);
-
-  const csv = [
-    [`Business`, report.business_name ?? report.business_url],
-    [`Keyword`, report.keyword],
-    [`City`, report.city],
-    [`Visibility Score`, `${report.visibility_score ?? 0}/100`],
-    [`Suburbs Checked`, `${report.suburbs_checked}/${report.suburbs_total}`],
-    [],
-    header,
-    ...rows,
-  ]
-    .map(row => row.map(c => `"${String(c).replace(/"/g, '""')}"`).join(","))
-    .join("\n");
-
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-  const url  = URL.createObjectURL(blob);
-  const a    = document.createElement("a");
-  a.href     = url;
-  a.download = `serpmapper-${(report.business_name ?? "report").replace(/[^a-z0-9]/gi, "-").toLowerCase()}.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
-}
+import { downloadReportPdf } from "@/lib/pdf-report";
 
 // Leaflet must not SSR
 const VisibilityMap = dynamic(() => import("./VisibilityMap"), { ssr: false });
@@ -69,7 +30,6 @@ export default function ReportView({
   const [isGated, setIsGated] = useState(gated);
   const [ctaUrl, setCtaUrl] = useState<string | null>(null);
   const [topMissedSuburb, setTopMissedSuburb] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
   const businessLat = toNumberOrNull(report.business_lat);
   const businessLng = toNumberOrNull(report.business_lng);
 
@@ -78,13 +38,6 @@ export default function ReportView({
     setTopMissedSuburb(suburb);
     setIsGated(false);
     onEmailCaptured?.();
-  }
-
-  async function handleCopyLink() {
-    const shareUrl = `${window.location.origin}/report/${report.report_id}`;
-    await navigator.clipboard.writeText(shareUrl);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
   }
 
   // Always send strategy/book CTA traffic to Traffic Radius contact page.
@@ -134,9 +87,9 @@ export default function ReportView({
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
-          {/* CSV download — instant, no email required */}
+          {/* PDF download */}
           <button
-            onClick={() => downloadCsv(report, results)}
+            onClick={() => downloadReportPdf({ report, results, cards })}
             className="flex items-center gap-2 px-4 py-2.5 border border-slate-200 rounded-xl text-sm font-medium
                        text-slate-700 bg-white hover:bg-slate-50 hover:border-slate-300 transition-all shadow-sm"
           >
@@ -144,16 +97,7 @@ export default function ReportView({
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                 d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
             </svg>
-            Download CSV
-          </button>
-
-          {/* Copy shareable link */}
-          <button
-            onClick={handleCopyLink}
-            className="flex items-center gap-2 px-4 py-2.5 border border-slate-200 rounded-xl text-sm font-medium
-                       text-slate-700 bg-white hover:bg-slate-50 hover:border-slate-300 transition-all shadow-sm"
-          >
-            {copied ? <><CheckIcon />Copied!</> : <><ShareIcon />Share map</>}
+            Download PDF
           </button>
         </div>
       </div>
@@ -354,19 +298,3 @@ function getBandInfo(position: number | null) {
   return { band: { bg: "#FEF2F2", text: "#B91C1C", dot: "#EF4444", label: "Not visible" } };
 }
 
-function ShareIcon() {
-  return (
-    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-        d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
-    </svg>
-  );
-}
-
-function CheckIcon() {
-  return (
-    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-    </svg>
-  );
-}

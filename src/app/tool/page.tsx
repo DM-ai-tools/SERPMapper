@@ -8,6 +8,7 @@ import ProcessingState from "@/components/ProcessingState";
 import ReportView from "@/components/ReportView";
 import ScoreGauge from "@/components/ScoreGauge";
 import { isVisiblePosition } from "@/lib/scoring";
+import { downloadReportPdf } from "@/lib/pdf-report";
 
 const VisibilityMap = dynamic(() => import("@/components/VisibilityMap"), { ssr: false });
 
@@ -249,33 +250,6 @@ function toNum(v: unknown): number | null {
   return isFinite(n) ? n : null;
 }
 
-function downloadCsv(report: SerpMapReport, results: SerpMapResult[]) {
-  const header = ["Suburb","State","Rank Position","Local Pack","Monthly Searches","Status"];
-  const rows = [...results]
-    .sort((a,b) => {
-      if (a.rank_position !== null && b.rank_position !== null) return a.rank_position - b.rank_position;
-      if (a.rank_position !== null) return -1;
-      if (b.rank_position !== null) return 1;
-      return (b.monthly_volume||0)-(a.monthly_volume||0);
-    })
-    .map(r => [r.suburb_name, r.suburb_state??"", r.rank_position??"Not ranking", r.is_in_local_pack?"Yes":"No", r.monthly_volume||0, r.dataforseo_status]);
-
-  const csv = [
-    [`Business`, report.business_name ?? report.business_url],
-    [`Keyword`, report.keyword],[`City`, report.city],
-    [`Visibility Score`, `${report.visibility_score??0}/100`],
-    [`Suburbs Checked`, `${report.suburbs_checked}/${report.suburbs_total}`],
-    [], header, ...rows,
-  ]
-    .map(row => row.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(","))
-    .join("\n");
-
-  const blob = new Blob([csv],{type:"text/csv;charset=utf-8;"});
-  const url  = URL.createObjectURL(blob);
-  const a    = document.createElement("a");
-  a.href=url; a.download=`serpmapper-${(report.business_name??"report").replace(/[^a-z0-9]/gi,"-").toLowerCase()}.csv`;
-  a.click(); URL.revokeObjectURL(url);
-}
 
 interface GatedViewProps {
   report: SerpMapReport;
@@ -391,11 +365,11 @@ function GatedView({ report, results, onUnlocked }: GatedViewProps) {
             </div>
 
             <button
-              onClick={() => downloadCsv(report, results)}
+              onClick={() => downloadReportPdf({ report, results })}
               className="w-full border border-gray-200 hover:border-gray-300 hover:bg-gray-50
                          text-gray-600 font-medium py-3 rounded-xl transition-colors text-sm flex items-center justify-center gap-2"
             >
-              <DownloadIcon /> Download CSV (no email needed)
+              <DownloadIcon /> Download PDF (no email needed)
             </button>
 
             <p className="text-center text-xs text-gray-400">
