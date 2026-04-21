@@ -127,6 +127,13 @@ export async function POST(req: NextRequest) {
     const uniqueSuburbs = suburbs.filter(
       (s, i, arr) => arr.findIndex(x => x.suburb_id === s.suburb_id) === i
     );
+    const populationBySuburbName = new Map<string, number>();
+    for (const s of uniqueSuburbs) {
+      const pop = Number(s.population ?? 0);
+      if (s.name && Number.isFinite(pop) && pop > 0) {
+        populationBySuburbName.set(s.name, pop);
+      }
+    }
 
     // ──────────────────────────────────────────
     // 5. Create a fresh report record (no cache_key — always a new UUID)
@@ -287,6 +294,9 @@ export async function POST(req: NextRequest) {
     let summaryText = "";
     let ctaCopy     = "";
     let cardTexts: string[] = [];
+    const hasCityVolume = Number.isFinite(cityMonthlyVolume) && (cityMonthlyVolume as number) > 0;
+    const hasMissedVolumeData = missed.some((s) => Number(s.monthly_volume ?? 0) > 0);
+    const usePopulationCards = !hasCityVolume || !hasMissedVolumeData;
 
     try {
       [summaryText, ctaCopy, cardTexts] = await Promise.all([
@@ -295,7 +305,12 @@ export async function POST(req: NextRequest) {
         missed.length > 0
           ? generateOpportunityCards(
               displayName, keyword,
-              missed.map((s) => ({ name: s.suburb_name, volume: s.monthly_volume }))
+              missed.map((s) => ({
+                name: s.suburb_name,
+                volume: s.monthly_volume,
+                population: populationBySuburbName.get(s.suburb_name) ?? null,
+              })),
+              { usePopulationPrompt: usePopulationCards }
             )
           : Promise.resolve([]),
       ]);
@@ -326,10 +341,20 @@ export async function POST(req: NextRequest) {
     for (let i = 0; i < missed.length; i++) {
       const suburb = missed[i];
       const monthlyVolume = Number.isFinite(suburb.monthly_volume) ? Math.max(suburb.monthly_volume, 0) : 0;
-      const fallbackText = monthlyVolume > 0
+      const population = populationBySuburbName.get(suburb.suburb_name);
+      const populationLabel =
+        population && population > 0 ? `${population.toLocaleString()} local residents` : "ABS area demand";
+      const populationFallbacks = [
+        `${suburb.suburb_name} has ${populationLabel} that cannot currently find your business on Google Maps.`,
+        `In ${suburb.suburb_name}, your business is still invisible to nearby customers and competitors keep winning local demand.`,
+        `${suburb.suburb_name} is a missed suburb where local customers are likely finding competitors first.`,
+        `${suburb.suburb_name} is untapped demand, but your business is not visible on Maps yet.`,
+        `You're missing exposure in ${suburb.suburb_name}; local customers currently cannot discover your business in map results.`,
+      ];
+      const fallbackText = monthlyVolume > 0 && !usePopulationCards
         ? `${suburb.suburb_name} has ${monthlyVolume} monthly searches — you are not visible here.`
-        : `${suburb.suburb_name} currently shows limited measured demand (0 searches/mo), and you are not visible there yet.`;
-      const text = monthlyVolume === 0 ? fallbackText : (cardTexts[i] ?? fallbackText);
+        : populationFallbacks[i % populationFallbacks.length];
+      const text = cardTexts[i] ?? fallbackText;
       await execute(
         `INSERT INTO opportunity_cards
            (report_id, suburb_name, rank_position, monthly_volume, card_text, display_order)

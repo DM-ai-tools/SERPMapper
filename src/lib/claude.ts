@@ -1,7 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 
-// claude-haiku-4-5 — cheapest capable model, ~$0.0004 per report
-const MODEL = "claude-haiku-4-5-20251001";
+// claude
+const MODEL = "claude-sonnet-4-6";
 
 let _client: Anthropic | null = null;
 function getClient(): Anthropic {
@@ -58,17 +58,43 @@ Do not use the phrase "Local Pack". Do not use asterisks or markdown.`;
 export async function generateOpportunityCards(
   businessName: string,
   keyword: string,
-  missedSuburbs: Array<{ name: string; volume: number }>
+  missedSuburbs: Array<{ name: string; volume?: number | null; population?: number | null }>,
+  options?: { usePopulationPrompt?: boolean }
 ): Promise<string[]> {
   if (missedSuburbs.length === 0) return [];
 
   const client = getClient();
+  const hasAnyPositiveVolume = missedSuburbs.some((s) => Number(s.volume ?? 0) > 0);
+  const usePopulationPrompt = options?.usePopulationPrompt || !hasAnyPositiveVolume;
 
-  const suburbList = missedSuburbs
-    .map((s, i) => `${i + 1}. ${s.name} (${s.volume}/mo searches)`)
-    .join("\n");
+  const prompt = usePopulationPrompt
+    ? `You are a local SEO advisor. Write exactly ${missedSuburbs.length} short opportunity statements (numbered 1-${missedSuburbs.length}).
+Business: "${businessName}"
+Keyword: "${keyword}"
+These are top suburbs where this business is NOT ranking on Google Maps.
 
-  const prompt = `You are writing opportunity cards for a local business. Each card is exactly one sentence.
+Suburbs and populations:
+${missedSuburbs
+  .map(
+    (s, i) =>
+      `${i + 1}. ${s.name} (ABS est. ${(s.population && s.population > 0 ? s.population.toLocaleString() : "data unavailable")} residents)`
+  )
+  .join("\n")}
+
+For each suburb write ONE sentence (max 20 words) that:
+- Mentions the suburb name
+- References ABS population context as untapped local demand
+- Creates urgency about being invisible there
+- Does NOT mention "searches/mo" or numeric search volume
+- Use varied wording across lines (do not repeat the same sentence pattern)
+- If a suburb has "data unavailable", still write a specific business opportunity sentence without repeating generic wording
+
+Example format:
+1. Box Hill has 32,000 residents searching locally — none of them can find you on Google Maps yet.
+2. Footscray's 28,000 residents are choosing competitors because you don't appear in their local search.
+
+Write only the ${missedSuburbs.length} numbered lines. No intro. No explanation. No markdown.`
+    : `You are writing opportunity cards for a local business. Each card is exactly one sentence.
 Be specific: name the suburb, mention the search volume, frame it as a missed opportunity.
 Tone: concrete, motivating, no hype.
 
@@ -76,7 +102,7 @@ Use ONLY this business name (do not replace it with Traffic Radius, DotMappers, 
 Business: ${businessName}
 Keyword: ${keyword}
 Missed suburbs:
-${suburbList}
+${missedSuburbs.map((s, i) => `${i + 1}. ${s.name} (${Math.max(0, Number(s.volume ?? 0))}/mo searches)`).join("\n")}
 
 Write exactly ${missedSuburbs.length} opportunity cards, one per line, numbered 1. 2. 3. etc.
 Each card must be one sentence only. No markdown. No asterisks.`;

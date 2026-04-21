@@ -205,13 +205,8 @@ export default function ReportView({
       {/* Full suburb table (unlocked only) */}
       {!isGated && results.length > 0 && (
         <div className="space-y-4">
-          <div className="w-full space-y-2">
+          <div className="w-full">
             <CitySearchVolumeCard report={report} results={results} />
-            <p className="text-xs text-slate-500 px-1">
-              <span className="font-semibold text-amber-700">⚠️ Data Availability Notice</span>{" "}
-              Search volume metrics in SERPMapper are available at the State and City level only.
-              Suburb-level data is not supported.
-            </p>
           </div>
           <SuburbTable results={results} city={report.city} />
         </div>
@@ -251,11 +246,11 @@ function SuburbTable({ results, city }: { results: SerpMapResult[]; city: string
       <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50">
         <h2 className="font-bold text-slate-900">All suburbs</h2>
       </div>
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto overflow-y-auto max-h-[460px]">
         <table className="w-full table-fixed text-sm">
           <thead className="bg-slate-50/90 text-slate-500 text-xs uppercase tracking-wide">
             <tr>
-              <th className="px-5 py-3 text-center">Suburb</th>
+              <th className="px-5 py-3 text-left">Suburb</th>
               <th className="px-5 py-3 text-center">City</th>
               <th className="px-5 py-3 text-center">State</th>
               <th className="px-5 py-3 text-center">Your Position</th>
@@ -267,7 +262,7 @@ function SuburbTable({ results, city }: { results: SerpMapResult[]; city: string
               const { band } = getBandInfo(r.rank_position);
               return (
                 <tr key={r.result_id} className="hover:bg-slate-50/80 transition-colors">
-                  <td className="px-5 py-3 text-center font-medium text-gray-900">{r.suburb_name}</td>
+                  <td className="px-5 py-3 text-left font-medium text-gray-900">{r.suburb_name}</td>
                   <td className="px-5 py-3 text-center text-gray-500">{city}</td>
                   <td className="px-5 py-3 text-center text-gray-500">{r.suburb_state ?? "—"}</td>
                   <td className="px-5 py-3 text-center text-gray-700">
@@ -321,13 +316,40 @@ function CitySearchVolumeCard({
     : `${report.city}, Australia`;
 
   return (
-    <div className="rounded-xl border border-slate-200/90 bg-white px-4 py-3 shadow-sm w-full">
-      <p className="text-xs uppercase tracking-wide text-slate-500 font-semibold">Number of searches</p>
-      <p className="mt-1 text-sm font-semibold text-slate-800">{locationLabel}</p>
-      <p className="mt-1.5 text-sm text-slate-600">
-        Searches for keyword "<span className="font-semibold text-slate-900">{report.keyword}</span>" ={" "}
-        <span className="font-bold text-brand-700">{cityVolume !== null ? cityVolume.toLocaleString() : "—"}</span>
-      </p>
+    <div className="rounded-2xl border border-slate-200/90 bg-white px-4 py-3 md:px-5 md:py-4 shadow-sm w-full">
+      <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-2.5">
+        <div>
+          <p className="text-[10px] uppercase tracking-[0.14em] text-teal-700 font-semibold">
+            ⦿ Local search demand
+          </p>
+          <p className="mt-1 text-[22px] leading-none font-extrabold text-slate-900 md:hidden">
+            {cityVolume !== null ? cityVolume.toLocaleString() : "—"}
+          </p>
+          <p className="mt-1 text-[24px] leading-none font-extrabold text-slate-900 hidden md:block">
+            {cityVolume !== null ? cityVolume.toLocaleString() : "—"}
+          </p>
+          <p className="text-slate-400 text-[11px] md:hidden">searches / month</p>
+          <p className="mt-1.5 text-lg md:text-[22px] font-bold text-slate-900 leading-tight">{locationLabel}</p>
+          <p className="mt-1 text-base md:text-[20px] font-medium text-slate-600">
+            Keyword:{" "}
+            <span className="text-teal-700 font-semibold">
+              "{report.keyword.toLowerCase()}"
+            </span>
+          </p>
+        </div>
+
+        <div className="text-right hidden md:block pt-2">
+          <p className="text-[50px] leading-none font-extrabold text-slate-900 tracking-tight">
+            {cityVolume !== null ? cityVolume.toLocaleString() : "—"}
+          </p>
+          <p className="mt-0.5 text-slate-400 text-xl font-medium">searches / month</p>
+        </div>
+      </div>
+
+      <div className="mt-2.5 rounded-xl border border-amber-100 bg-amber-50/70 px-3 py-2 text-amber-700 text-xs">
+        <span className="font-medium">ⓘ</span>{" "}
+        City-level data only. Suburb-level search volume is not available from Google.
+      </div>
     </div>
   );
 }
