@@ -6,6 +6,7 @@ import { SerpMapReport, SerpMapResult, OpportunityCard as OppCard } from "@/lib/
 import OpportunityCard from "./OpportunityCard";
 import EmailGate from "./EmailGate";
 import ScoreGauge from "./ScoreGauge";
+import { isVisiblePosition } from "@/lib/scoring";
 
 // ── Client-side CSV download ──────────────────────────────────
 function downloadCsv(report: SerpMapReport, results: SerpMapResult[]) {
@@ -171,15 +172,15 @@ export default function ReportView({
           </p>
           <div className="flex gap-3 text-sm flex-wrap">
             <Stat
-              value={`${results.filter((r) => r.rank_position !== null).length}/${results.length}`}
+              value={`${results.filter((r) => isVisiblePosition(r.rank_position)).length}/${results.length}`}
               label="Suburbs ranking"
             />
             <Stat
-              value={`${results.filter((r) => r.rank_position !== null && r.rank_position <= 3).length}`}
+              value={`${results.filter((r) => isVisiblePosition(r.rank_position) && (r.rank_position ?? 99) <= 3).length}`}
               label="Top 3 positions"
             />
             <Stat
-              value={`${results.filter((r) => r.rank_position === null).length}`}
+              value={`${results.filter((r) => !isVisiblePosition(r.rank_position)).length}`}
               label="Invisible suburbs"
             />
           </div>

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { SerpMapReport, SerpMapResult } from "@/lib/types";
+import { isVisiblePosition } from "@/lib/scoring";
 
 interface EmailGateProps {
   reportId: string;
@@ -87,8 +88,8 @@ export default function EmailGate({ reportId, visibilityScore, report, results, 
     }
   }
 
-  const ranked  = results.filter(r => r.rank_position !== null).length;
-  const missed  = results.filter(r => r.rank_position === null).length;
+  const ranked  = results.filter(r => isVisiblePosition(r.rank_position)).length;
+  const missed  = results.filter(r => !isVisiblePosition(r.rank_position)).length;
 
   return (
     <div className="bg-white rounded-2xl shadow-2xl overflow-hidden max-w-md w-full mx-auto">

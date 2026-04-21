@@ -1,5 +1,10 @@
 import { SerpMapResult, getRankBand, RANK_WEIGHTS } from "./types";
 
+/** Visibility means ranking in Google Maps top 20. */
+export function isVisiblePosition(position: number | null | undefined): boolean {
+  return position !== null && position !== undefined && position <= 20;
+}
+
 /**
  * Calculate the SERPMapper Visibility Score (0–100).
  *
@@ -46,7 +51,7 @@ export function getTopMissedSuburbs(
   limit = 5
 ): SerpMapResult[] {
   return results
-    .filter((r) => r.rank_position === null)
+    .filter((r) => !isVisiblePosition(r.rank_position))
     .sort((a, b) => (b.monthly_volume || 0) - (a.monthly_volume || 0))
     .slice(0, limit);
 }
@@ -60,8 +65,8 @@ export function buildReportSummary(
   keyword: string
 ) {
   const total = results.length;
-  const ranking = results.filter((r) => r.rank_position !== null);
-  const top3 = results.filter((r) => r.rank_position !== null && r.rank_position <= 3);
+  const ranking = results.filter((r) => isVisiblePosition(r.rank_position));
+  const top3 = results.filter((r) => isVisiblePosition(r.rank_position) && (r.rank_position ?? 99) <= 3);
   const missed = getTopMissedSuburbs(results, 5);
   const score = calculateVisibilityScore(results);
 

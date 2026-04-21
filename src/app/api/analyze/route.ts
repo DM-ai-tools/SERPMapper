@@ -207,7 +207,7 @@ export async function POST(req: NextRequest) {
     // ──────────────────────────────────────────
     // 9. Write live results back to DB
     // ──────────────────────────────────────────
-    let resolvedCount = 0;
+    let visibleCount = 0;
     await Promise.allSettled(
       liveResults.map(({ tag, result }) => {
         const suburbId = tag.split("_").pop();
@@ -217,7 +217,7 @@ export async function POST(req: NextRequest) {
           ? findBusinessRank(result, businessUrlForReport, businessName)
           : { position: null, inLocalPack: false };
 
-        if (position !== null) resolvedCount++;
+        if (position !== null && position <= 20) visibleCount++;
 
         return execute(
           `UPDATE serpmap_results
@@ -259,7 +259,7 @@ export async function POST(req: NextRequest) {
       ]);
     } catch (aiErr) {
       console.warn("[analyze] AI generation skipped:", aiErr);
-      summaryText = `${displayName} ranks in ${resolvedCount} of ${allResults.length} suburbs for "${keyword}".`;
+      summaryText = `${displayName} is visible in the top 20 in ${visibleCount} of ${allResults.length} suburbs for "${keyword}".`;
     }
 
     // ──────────────────────────────────────────

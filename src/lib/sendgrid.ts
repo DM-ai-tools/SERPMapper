@@ -1,4 +1,5 @@
 import sgMail from "@sendgrid/mail";
+import { isVisiblePosition } from "./scoring";
 
 sgMail.setApiKey(process.env.SENDGRID_API_KEY!);
 
@@ -45,9 +46,9 @@ function rankColor(pos: number | null): string {
 // ── Inline HTML email template ────────────────────────────────
 function buildReportEmailHtml(data: ReportEmailData): string {
   const reportUrl = `${APP_URL}/report/${data.reportId}`;
-  const ranked    = data.suburbResults.filter(r => r.rank_position !== null);
+  const ranked    = data.suburbResults.filter(r => isVisiblePosition(r.rank_position));
   const top3      = ranked.filter(r => r.rank_position! <= 3);
-  const missed    = data.suburbResults.filter(r => r.rank_position === null);
+  const missed    = data.suburbResults.filter(r => !isVisiblePosition(r.rank_position));
 
   const suburbRows = data.suburbResults
     .sort((a, b) => {
@@ -159,7 +160,7 @@ function buildReportEmailHtml(data: ReportEmailData): string {
 // ── Send the full report email (no template ID needed) ────────
 export async function sendReportEmail(data: ReportEmailData): Promise<void> {
   const reportUrl = `${APP_URL}/report/${data.reportId}`;
-  const ranked    = data.suburbResults.filter(r => r.rank_position !== null);
+  const ranked    = data.suburbResults.filter(r => isVisiblePosition(r.rank_position));
 
   await sgMail.send({
     to:      data.email,

@@ -7,6 +7,7 @@ import { SerpMapReport, SerpMapResult, OpportunityCard } from "@/lib/types";
 import ProcessingState from "@/components/ProcessingState";
 import ReportView from "@/components/ReportView";
 import ScoreGauge from "@/components/ScoreGauge";
+import { isVisiblePosition } from "@/lib/scoring";
 
 const VisibilityMap = dynamic(() => import("@/components/VisibilityMap"), { ssr: false });
 
@@ -284,8 +285,8 @@ interface GatedViewProps {
 
 function GatedView({ report, results, onUnlocked }: GatedViewProps) {
   const score   = report.visibility_score ?? 0;
-  const ranked  = results.filter(r => r.rank_position !== null).length;
-  const missed  = results.filter(r => r.rank_position === null).length;
+  const ranked  = results.filter(r => isVisiblePosition(r.rank_position)).length;
+  const missed  = results.filter(r => !isVisiblePosition(r.rank_position)).length;
   const lat = toNum(report.business_lat);
   const lng = toNum(report.business_lng);
 
