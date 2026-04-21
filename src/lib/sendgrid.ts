@@ -55,7 +55,7 @@ function buildReportEmailHtml(data: ReportEmailData): string {
       if (a.rank_position !== null && b.rank_position !== null) return a.rank_position - b.rank_position;
       if (a.rank_position !== null) return -1;
       if (b.rank_position !== null) return 1;
-      return (b.monthly_volume || 0) - (a.monthly_volume || 0);
+      return a.suburb_name.localeCompare(b.suburb_name);
     })
     .slice(0, 20) // top 20 rows in email
     .map(r => `
@@ -65,9 +65,6 @@ function buildReportEmailHtml(data: ReportEmailData): string {
           <span style="background:${rankColor(r.rank_position)}20;color:${rankColor(r.rank_position)};padding:2px 8px;border-radius:99px;font-weight:600;font-size:12px">
             ${rankLabel(r.rank_position)}
           </span>
-        </td>
-        <td style="padding:8px 12px;border-bottom:1px solid #f1f5f9;font-size:13px;color:#64748b;text-align:right">
-          ${r.monthly_volume > 0 ? r.monthly_volume.toLocaleString() + "/mo" : "—"}
         </td>
       </tr>`)
     .join("");
@@ -124,7 +121,6 @@ function buildReportEmailHtml(data: ReportEmailData): string {
               <tr style="background:#f8fafc">
                 <th style="padding:10px 12px;font-size:11px;font-weight:600;color:#64748b;text-align:left;text-transform:uppercase;letter-spacing:.5px">Suburb</th>
                 <th style="padding:10px 12px;font-size:11px;font-weight:600;color:#64748b;text-align:center;text-transform:uppercase;letter-spacing:.5px">Position</th>
-                <th style="padding:10px 12px;font-size:11px;font-weight:600;color:#64748b;text-align:right;text-transform:uppercase;letter-spacing:.5px">Searches</th>
               </tr>
             </thead>
             <tbody>${suburbRows}</tbody>

@@ -26,6 +26,24 @@ import { AnalyzeRequest, AnalyzeResponse, SerpMapResult } from "@/lib/types";
 /** DataforSEO runs one request per suburb — allow enough time for ~60 suburbs. */
 export const maxDuration = 300;
 
+function buildVisibilitySummaryFallback(opts: {
+  displayName: string;
+  keyword: string;
+  visibleCount: number;
+  totalSuburbs: number;
+  score: number;
+  missedTopNames: string[];
+}): string {
+  const { displayName, keyword, visibleCount, totalSuburbs, score, missedTopNames } = opts;
+  const gap =
+    missedTopNames.length >= 2
+      ? `Notable gaps include ${missedTopNames[0]} and ${missedTopNames[1]}. `
+      : missedTopNames.length === 1
+        ? `A priority gap is ${missedTopNames[0]}. `
+        : "";
+  return `${displayName} appears in the top 20 Google Maps results for "${keyword}" in ${visibleCount} of ${totalSuburbs} suburbs checked, with a visibility score of ${score}. ${gap}Improving map visibility in those areas helps more nearby customers discover you before competitors.`;
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body: AnalyzeRequest = await req.json();
@@ -127,14 +145,6 @@ export async function POST(req: NextRequest) {
     const uniqueSuburbs = suburbs.filter(
       (s, i, arr) => arr.findIndex(x => x.suburb_id === s.suburb_id) === i
     );
-    const populationBySuburbName = new Map<string, number>();
-    for (const s of uniqueSuburbs) {
-      const pop = Number(s.population ?? 0);
-      if (s.name && Number.isFinite(pop) && pop > 0) {
-        populationBySuburbName.set(s.name, pop);
-      }
-    }
-
     // ──────────────────────────────────────────
     // 5. Create a fresh report record (no cache_key — always a new UUID)
     // ──────────────────────────────────────────
@@ -294,25 +304,45 @@ export async function POST(req: NextRequest) {
     let summaryText = "";
     let ctaCopy     = "";
     let cardTexts: string[] = [];
-    const hasCityVolume = Number.isFinite(cityMonthlyVolume) && (cityMonthlyVolume as number) > 0;
-    const hasMissedVolumeData = missed.some((s) => Number(s.monthly_volume ?? 0) > 0);
-    const usePopulationCards = !hasCityVolume || !hasMissedVolumeData;
 
-    try {
-      [summaryText, ctaCopy, cardTexts] = await Promise.all([
-        generateVisibilitySummary(summary),
-        generateCtaCopy(displayName, keyword, missed[0]?.suburb_name ?? null),
-        missed.length > 0
-          ? generateOpportunityCards(
-              displayName,
-              keyword,
-              missed.map((s) => ({ name: s.suburb_name }))
-            )
-          : Promise.resolve([]),
-      ]);
-    } catch (aiErr) {
-      console.warn("[analyze] AI generation skipped:", aiErr);
-      summaryText = `${displayName} is visible in the top 20 in ${visibleCount} of ${allResults.length} suburbs for "${keyword}".`;
+    const [sumOut, ctaOut, cardsOut] = await Promise.allSettled([
+      generateVisibilitySummary(summary),
+      generateCtaCopy(displayName, keyword, missed[0]?.suburb_name ?? null),
+      missed.length > 0
+        ? generateOpportunityCards(
+            displayName,
+            keyword,
+            missed.map((s) => ({ name: s.suburb_name }))
+          )
+        : Promise.resolve<string[]>([]),
+    ]);
+
+    if (sumOut.status === "fulfilled") {
+      summaryText = sumOut.value;
+    } else {
+      console.warn("[analyze] visibility summary AI failed:", sumOut.reason);
+      summaryText = buildVisibilitySummaryFallback({
+        displayName,
+        keyword,
+        visibleCount: summary.rankingCount,
+        totalSuburbs: summary.total,
+        score: summary.score,
+        missedTopNames: missed.slice(0, 3).map((m) => m.suburb_name),
+      });
+    }
+
+    if (ctaOut.status === "fulfilled") {
+      ctaCopy = ctaOut.value;
+    } else {
+      console.warn("[analyze] CTA AI failed:", ctaOut.reason);
+      ctaCopy = `Improve your Google Maps visibility for "${keyword}" in ${missed[0]?.suburb_name ?? "your area"}.`;
+    }
+
+    if (cardsOut.status === "fulfilled") {
+      cardTexts = cardsOut.value;
+    } else {
+      console.warn("[analyze] opportunity cards AI failed:", cardsOut.reason);
+      cardTexts = [];
     }
 
     // ──────────────────────────────────────────
@@ -334,22 +364,29 @@ export async function POST(req: NextRequest) {
     );
 
     // Insert opportunity cards (fresh — no carry-over from previous runs)
+    const opportunityFallbacks = [
+      (name: string) =>
+        `${name} is a pocket where you still do not show on Google Maps — nearby customers are likely choosing whoever appears first.`,
+      (name: string) =>
+        `In ${name}, your listing is not surfacing in the local map pack, so demand in that area is effectively walking past you.`,
+      (name: string) =>
+        `${name} represents a visibility gap: stronger map presence here would put you in front of more ready-to-buy locals.`,
+      (name: string) =>
+        `You are not visible in ${name} yet, which means searches there are quietly feeding competitors instead of your business.`,
+      (name: string) =>
+        `${name} is worth prioritising on Maps — every week you are absent, rivals keep consolidating trust in that suburb.`,
+      (name: string) =>
+        `Local intent in ${name} is going unanswered by your profile because you are not appearing in their map results.`,
+      (name: string) =>
+        `${name} is a missed catchment on Google Maps; showing up there would widen your reach without changing your service area.`,
+      (name: string) =>
+        `Winning ${name} on Maps is about being findable at the moment of need — right now, that moment skips your business.`,
+    ];
+
     for (let i = 0; i < missed.length; i++) {
       const suburb = missed[i];
       const monthlyVolume = Number.isFinite(suburb.monthly_volume) ? Math.max(suburb.monthly_volume, 0) : 0;
-      const population = populationBySuburbName.get(suburb.suburb_name);
-      const populationLabel =
-        population && population > 0 ? `${population.toLocaleString()} local residents` : "ABS area demand";
-      const populationFallbacks = [
-        `${suburb.suburb_name} has ${populationLabel} that cannot currently find your business on Google Maps.`,
-        `In ${suburb.suburb_name}, your business is still invisible to nearby customers and competitors keep winning local demand.`,
-        `${suburb.suburb_name} is a missed suburb where local customers are likely finding competitors first.`,
-        `${suburb.suburb_name} is untapped demand, but your business is not visible on Maps yet.`,
-        `You're missing exposure in ${suburb.suburb_name}; local customers currently cannot discover your business in map results.`,
-      ];
-      const fallbackText = monthlyVolume > 0 && !usePopulationCards
-        ? `${suburb.suburb_name} has ${monthlyVolume} monthly searches — you are not visible here.`
-        : populationFallbacks[i % populationFallbacks.length];
+      const fallbackText = opportunityFallbacks[i % opportunityFallbacks.length](suburb.suburb_name);
       const text = cardTexts[i] ?? fallbackText;
       await execute(
         `INSERT INTO opportunity_cards

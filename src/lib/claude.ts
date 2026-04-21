@@ -1,12 +1,36 @@
 import Anthropic from "@anthropic-ai/sdk";
 
-
-const MODEL = "claude-sonnet-4-6";
+const PRIMARY_MODEL =
+  (process.env.ANTHROPIC_MODEL && process.env.ANTHROPIC_MODEL.trim()) || "claude-sonnet-4-6";
+const FALLBACK_MODEL =
+  (process.env.ANTHROPIC_MODEL_FALLBACK && process.env.ANTHROPIC_MODEL_FALLBACK.trim()) ||
+  "claude-haiku-4-5-20251001";
 
 let _client: Anthropic | null = null;
 function getClient(): Anthropic {
   if (!_client) _client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
   return _client;
+}
+
+async function createChatMessage(
+  max_tokens: number,
+  messages: Anthropic.MessageParam[]
+): Promise<Anthropic.Messages.Message> {
+  const client = getClient();
+  try {
+    return await client.messages.create({
+      model: PRIMARY_MODEL,
+      max_tokens,
+      messages,
+    });
+  } catch (err) {
+    console.warn(`[claude] model "${PRIMARY_MODEL}" failed, trying "${FALLBACK_MODEL}":`, err);
+    return await client.messages.create({
+      model: FALLBACK_MODEL,
+      max_tokens,
+      messages,
+    });
+  }
 }
 
 export interface ReportSummaryInput {
@@ -27,8 +51,6 @@ export interface ReportSummaryInput {
 export async function generateVisibilitySummary(
   input: ReportSummaryInput
 ): Promise<string> {
-  const client = getClient();
-
   const prompt = `You are writing a concise visibility summary for a local business owner.
 Be specific, use their business name and keyword, and keep it to 2-3 sentences.
 Tone: direct, empathetic, data-driven. No marketing fluff.
@@ -44,11 +66,7 @@ Do not use the phrase "Local Pack". Do not use asterisks or markdown.
 
 CRITICAL: Do not mention search volume, "monthly searches", keyword demand counts, or any numbers in parentheses next to suburb names. Suburb names only (e.g. "areas such as Melbourne and Dandenong"). The UI shows city search volume elsewhere; this paragraph must not contradict it or invent figures.`;
 
-  const message = await client.messages.create({
-    model: MODEL,
-    max_tokens: 200,
-    messages: [{ role: "user", content: prompt }],
-  });
+  const message = await createChatMessage(200, [{ role: "user", content: prompt }]);
 
   return extractText(message.content);
 }
@@ -64,8 +82,6 @@ export async function generateOpportunityCards(
 ): Promise<string[]> {
   if (missedSuburbs.length === 0) return [];
 
-  const client = getClient();
-
   const prompt = `You are a local SEO advisor. Write exactly ${missedSuburbs.length} short, compelling opportunity statements (numbered 1-${missedSuburbs.length}).
 
 Business: "${businessName}"
@@ -77,6 +93,7 @@ ${missedSuburbs.map((s, i) => `${i + 1}. ${s.name}`).join("\n")}
 
 For each suburb write ONE sentence (max 20 words) that:
 - Mentions the suburb name
+- CRITICAL: Sentence i (the line starting with "i.") must refer ONLY to the suburb numbered i in the list above. Do not name any other suburb on that line.
 - Frames the lack of visibility as a missed opportunity
 - Creates urgency or emotional resonance
 - Does NOT mention any numbers (no population, no search volume, no "residents", no "searches/mo")
@@ -90,11 +107,7 @@ Example format:
 
 Write only the ${missedSuburbs.length} numbered lines. No intro. No explanation. No markdown. No asterisks.`;
 
-  const message = await client.messages.create({
-    model: MODEL,
-    max_tokens: 400,
-    messages: [{ role: "user", content: prompt }],
-  });
+  const message = await createChatMessage(400, [{ role: "user", content: prompt }]);
 
   const text = extractText(message.content);
   return text
@@ -111,8 +124,6 @@ export async function generateCtaCopy(
   keyword: string,
   topMissedSuburb: string | null
 ): Promise<string> {
-  const client = getClient();
-
   const prompt = `Write a single, compelling CTA sentence encouraging a local business owner to improve their Google Maps visibility.
 Use ONLY the business name below (never Traffic Radius, DotMappers, or SERPMapper as the client's name). Use the keyword and suburb. Be specific and direct.
 Max 20 words. No exclamation marks. No markdown. No asterisks.
@@ -123,11 +134,7 @@ Top missed suburb: ${topMissedSuburb ?? "your area"}
 
 Write the CTA sentence only.`;
 
-  const message = await client.messages.create({
-    model: MODEL,
-    max_tokens: 80,
-    messages: [{ role: "user", content: prompt }],
-  });
+  const message = await createChatMessage(80, [{ role: "user", content: prompt }]);
 
   return extractText(message.content);
 }

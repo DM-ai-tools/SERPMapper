@@ -65,15 +65,11 @@ function tooltipHtml(result: SerpMapResult): string {
   const posText = result.rank_position
     ? `Position #${result.rank_position}${result.is_in_local_pack ? " (Local Pack)" : ""}`
     : "Not ranking in top 20";
-  const volText =
-    result.monthly_volume > 0
-      ? `${result.monthly_volume.toLocaleString()} searches/mo`
-      : "Volume unavailable";
   return `
     <div style="font-family:sans-serif;font-size:13px;line-height:1.5;min-width:140px;">
       <strong style="display:block;margin-bottom:2px;">${result.suburb_name}</strong>
       <span style="color:#555;">${posText}</span><br/>
-      <span style="color:#888;font-size:11px;">${volText}</span>
+      <span style="color:#888;font-size:11px;">Keyword demand for your city is shown in the report panel.</span>
     </div>`;
 }
 
