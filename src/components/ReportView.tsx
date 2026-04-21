@@ -317,18 +317,11 @@ function CitySearchVolumeCard({
 
   return (
     <div className="rounded-2xl border border-slate-200/90 bg-white px-4 py-3 md:px-5 md:py-4 shadow-sm w-full">
-      <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-2.5">
-        <div>
+      <div className="flex flex-row items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
           <p className="text-[10px] uppercase tracking-[0.14em] text-teal-700 font-semibold">
             ⦿ Local search demand
           </p>
-          <p className="mt-1 text-[22px] leading-none font-extrabold text-slate-900 md:hidden">
-            {cityVolume !== null ? cityVolume.toLocaleString() : "—"}
-          </p>
-          <p className="mt-1 text-[24px] leading-none font-extrabold text-slate-900 hidden md:block">
-            {cityVolume !== null ? cityVolume.toLocaleString() : "—"}
-          </p>
-          <p className="text-slate-400 text-[11px] md:hidden">searches / month</p>
           <p className="mt-1.5 text-lg md:text-[22px] font-bold text-slate-900 leading-tight">{locationLabel}</p>
           <p className="mt-1 text-base md:text-[20px] font-medium text-slate-600">
             Keyword:{" "}
@@ -338,11 +331,11 @@ function CitySearchVolumeCard({
           </p>
         </div>
 
-        <div className="text-right hidden md:block pt-2">
-          <p className="text-[50px] leading-none font-extrabold text-slate-900 tracking-tight">
+        <div className="text-right shrink-0 pt-0.5 md:pt-1">
+          <p className="text-[22px] md:text-[24px] leading-none font-extrabold text-slate-900 tracking-tight">
             {cityVolume !== null ? cityVolume.toLocaleString() : "—"}
           </p>
-          <p className="mt-0.5 text-slate-400 text-xl font-medium">searches / month</p>
+          <p className="mt-0.5 text-slate-400 text-[11px] md:text-sm font-medium">searches / month</p>
         </div>
       </div>
 

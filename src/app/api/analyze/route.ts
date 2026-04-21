@@ -304,13 +304,9 @@ export async function POST(req: NextRequest) {
         generateCtaCopy(displayName, keyword, missed[0]?.suburb_name ?? null),
         missed.length > 0
           ? generateOpportunityCards(
-              displayName, keyword,
-              missed.map((s) => ({
-                name: s.suburb_name,
-                volume: s.monthly_volume,
-                population: populationBySuburbName.get(s.suburb_name) ?? null,
-              })),
-              { usePopulationPrompt: usePopulationCards }
+              displayName,
+              keyword,
+              missed.map((s) => ({ name: s.suburb_name }))
             )
           : Promise.resolve([]),
       ]);

@@ -82,10 +82,7 @@ export function buildReportSummary(
     rankingCount: ranking.length,
     top3Count: top3.length,
     missedCount: total - ranking.length,
-    topMissedSuburbs: missed.map((r) => ({
-      name: r.suburb_name,
-      volume: r.monthly_volume,
-    })),
+    topMissedSuburbs: missed.map((r) => ({ name: r.suburb_name })),
     topRankedSuburbs: ranking
       .sort((a, b) => (a.rank_position ?? 99) - (b.rank_position ?? 99))
       .slice(0, 3)

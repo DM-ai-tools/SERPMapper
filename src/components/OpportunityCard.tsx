@@ -18,14 +18,7 @@ export default function OpportunityCard({ card, rank }: Props) {
         )}
 
         <div className="flex-1 min-w-0">
-          <div className="flex items-center justify-between gap-2 flex-wrap">
-            <h3 className="font-semibold text-gray-900 text-sm">{card.suburb_name}</h3>
-            {card.monthly_volume > 0 && (
-              <span className="text-xs text-gray-500 bg-gray-100 rounded-full px-2 py-0.5 flex-shrink-0">
-                {card.monthly_volume.toLocaleString()} searches/mo
-              </span>
-            )}
-          </div>
+          <h3 className="font-semibold text-gray-900 text-sm">{card.suburb_name}</h3>
 
           <p className="text-sm text-gray-600 mt-1 leading-relaxed">{card.card_text}</p>
 
