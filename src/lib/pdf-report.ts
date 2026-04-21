@@ -1,4 +1,4 @@
-﻿import { OpportunityCard, SerpMapReport, SerpMapResult } from "./types";
+import { OpportunityCard, SerpMapReport, SerpMapResult } from "./types";
 import { isVisiblePosition } from "./scoring";
 
 interface PdfInput {
@@ -13,6 +13,17 @@ function rankLabel(position: number | null): string {
   if (position <= 10) return "Page 1";
   return "Page 2";
 }
+
+const STATE_FULL: Record<string, string> = {
+  VIC: "Victoria",
+  NSW: "New South Wales",
+  QLD: "Queensland",
+  WA: "Western Australia",
+  SA: "South Australia",
+  TAS: "Tasmania",
+  ACT: "Australian Capital Territory",
+  NT: "Northern Territory",
+};
 
 async function captureMapDataUrl(): Promise<string | null> {
   try {
@@ -50,9 +61,18 @@ export async function downloadReportPdf({ report, results, cards = [] }: PdfInpu
 
   const reportUrl = `${window.location.origin}/report/${report.report_id}`;
   const visible = results.filter((r) => isVisiblePosition(r.rank_position));
+  const stateAbbr = (results.find((r) => r.suburb_state)?.suburb_state ?? "").toUpperCase();
+  const stateFull = STATE_FULL[stateAbbr] ?? stateAbbr;
+  const locationLabel = stateFull
+    ? `${report.city}, ${stateFull}, Australia`
+    : `${report.city}, Australia`;
+  const cityVolume =
+    Number.isFinite(report.city_monthly_volume) && Number(report.city_monthly_volume) >= 0
+      ? Number(report.city_monthly_volume)
+      : null;
   const topMissed = results
     .filter((r) => !isVisiblePosition(r.rank_position))
-    .sort((a, b) => (b.monthly_volume || 0) - (a.monthly_volume || 0))
+    .sort((a, b) => a.suburb_name.localeCompare(b.suburb_name))
     .slice(0, 5);
 
   doc.setFont("helvetica", "bold");
@@ -75,6 +95,33 @@ export async function downloadReportPdf({ report, results, cards = [] }: PdfInpu
     doc.text(line, margin, y);
     y += 13;
   });
+  y += 4;
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(11);
+  doc.text("Number of searches", margin, y);
+  y += 14;
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10);
+  doc.text(locationLabel, margin, y);
+  y += 13;
+  doc.text(
+    `Searches for keyword "${report.keyword}" = ${
+      cityVolume !== null ? cityVolume.toLocaleString() : "—"
+    }`,
+    margin,
+    y
+  );
+  y += 16;
+  doc.setFontSize(9);
+  doc.setTextColor(120, 113, 108);
+  doc.text(
+    "Data Availability Notice: Search volume metrics are available at State and City level only.",
+    margin,
+    y
+  );
+  doc.setTextColor(0, 0, 0);
+  y += 12;
 
   doc.setTextColor(25, 84, 211);
   doc.text("Open Interactive Map", margin, y + 2);
@@ -101,7 +148,7 @@ export async function downloadReportPdf({ report, results, cards = [] }: PdfInpu
       body: topMissed.map((r) => [
         r.suburb_name,
         cardBySuburb.get(r.suburb_name) ??
-          `${r.suburb_name} has ${r.monthly_volume || 0} monthly searches and is not visible in top 20.`,
+          `${r.suburb_name} is currently not visible in the top 20.`,
       ]),
       styles: { fontSize: 9, cellPadding: 5, overflow: "linebreak" },
       headStyles: { fillColor: [15, 23, 42], textColor: [255, 255, 255] },
@@ -112,20 +159,19 @@ export async function downloadReportPdf({ report, results, cards = [] }: PdfInpu
 
   autoTable(doc, {
     startY: y,
-    head: [["Suburb", "State", "Position", "Local Pack", "Searches/mo", "Status"]],
+    head: [["Suburb", "City", "State", "Position", "Status"]],
     body: [...results]
       .sort((a, b) => {
         const ap = a.rank_position ?? 999;
         const bp = b.rank_position ?? 999;
         if (ap !== bp) return ap - bp;
-        return (b.monthly_volume || 0) - (a.monthly_volume || 0);
+        return a.suburb_name.localeCompare(b.suburb_name);
       })
       .map((r) => [
         r.suburb_name,
+        report.city,
         r.suburb_state ?? "",
         r.rank_position ?? "-",
-        r.is_in_local_pack ? "Yes" : "No",
-        r.monthly_volume || 0,
         rankLabel(r.rank_position),
       ]),
     styles: { fontSize: 8.4, cellPadding: 4.2 },

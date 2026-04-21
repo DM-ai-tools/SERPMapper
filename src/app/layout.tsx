@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Inter, Montserrat } from "next/font/google";
 import "./globals.css";
+import LogoutButton from "@/components/LogoutButton";
 
 const sans = Inter({
   subsets: ["latin"],
@@ -91,6 +92,7 @@ export default function RootLayout({
                   How it works
                 </a>
               </nav>
+              <LogoutButton />
               <a
                 href="https://trafficradius.com.au/contact-us/"
                 target="_blank"
