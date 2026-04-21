@@ -2,13 +2,25 @@ import { NextRequest, NextResponse } from "next/server";
 import { query, queryOne, execute, insertReturning, ensureDatabaseReady } from "@/lib/db";
 import { resolveBusinessFromUrl } from "@/lib/places";
 import { fetchLiveSuburbVolumes, getSuburbsInRadius } from "@/lib/suburbs";
-import { getLiveResults, findBusinessRank, DFSTaskPostRequest } from "@/lib/dataforseo";
+import {
+  getLiveResults,
+  findBusinessRank,
+  DFSTaskPostRequest,
+  getKeywordVolumes,
+  getKeywordVolumesByLocationTasks,
+  normaliseVolumeKeyword,
+} from "@/lib/dataforseo";
 import {
   generateVisibilitySummary,
   generateOpportunityCards,
   generateCtaCopy,
 } from "@/lib/claude";
-import { calculateVisibilityScore, getTopMissedSuburbs, buildReportSummary } from "@/lib/scoring";
+import {
+  calculateVisibilityScore,
+  getTopMissedSuburbs,
+  buildReportSummary,
+  isVisiblePosition,
+} from "@/lib/scoring";
 import { AnalyzeRequest, AnalyzeResponse, SerpMapResult } from "@/lib/types";
 
 /** DataforSEO runs one request per suburb — allow enough time for ~60 suburbs. */
@@ -134,7 +146,11 @@ export async function POST(req: NextRequest) {
     // 6. Resolve suburb monthly volumes (live via DataforSEO Keywords Data + cache)
     // ──────────────────────────────────────────
     const volumeBySuburbId = await fetchLiveSuburbVolumes(
-      uniqueSuburbs.map((s) => ({ suburb_id: s.suburb_id, name: s.name })),
+      uniqueSuburbs.map((s) => ({
+        suburb_id: s.suburb_id,
+        name: s.name,
+        dataforseo_location_name: s.dataforseo_location_name,
+      })),
       keyword,
       uniqueSuburbs
     );
@@ -173,6 +189,32 @@ export async function POST(req: NextRequest) {
       os:            "windows",
       tag:           `serpmap_${reportId}_${s.suburb_id}`,
     }));
+
+    let cityMonthlyVolume: number | null = null;
+    try {
+      const cityVol = await getKeywordVolumesByLocationTasks([
+        {
+          tag: "city_volume",
+          keyword,
+          location_name: cityLocationName,
+        },
+      ]);
+      cityMonthlyVolume = cityVol.get("city_volume") ?? null;
+
+      if (cityMonthlyVolume === null) {
+        const fallbackPhrases = [keyword, `${keyword} ${city}`];
+        const fallbackMap = await getKeywordVolumes(fallbackPhrases);
+        for (const phrase of fallbackPhrases) {
+          const vol = fallbackMap.get(normaliseVolumeKeyword(phrase));
+          if (Number.isFinite(vol) && (vol as number) > 0) {
+            cityMonthlyVolume = vol as number;
+            break;
+          }
+        }
+      }
+    } catch (err) {
+      console.warn("[analyze] city keyword volume lookup failed:", err);
+    }
 
     let liveResults: Array<{ tag: string; result: import("@/lib/dataforseo").DFSTaskResult | null }>;
     try {
@@ -217,7 +259,7 @@ export async function POST(req: NextRequest) {
           ? findBusinessRank(result, businessUrlForReport, businessName)
           : { position: null, inLocalPack: false };
 
-        if (position !== null && position <= 20) visibleCount++;
+        if (isVisiblePosition(position)) visibleCount++;
 
         return execute(
           `UPDATE serpmap_results
@@ -268,22 +310,31 @@ export async function POST(req: NextRequest) {
     await execute(
       `UPDATE serpmap_reports
        SET status = 'completed', visibility_score = $1, summary_text = $2, cta_copy = $3,
-           suburbs_checked = $4, completed_at = NOW()
-       WHERE report_id = $5`,
-      [score, summaryText, ctaCopy,
-       allResults.filter(r => r.dataforseo_status === "completed").length,
-       reportId]
+           suburbs_checked = $4, city_monthly_volume = $5, completed_at = NOW()
+       WHERE report_id = $6`,
+      [
+        score,
+        summaryText,
+        ctaCopy,
+        allResults.filter(r => r.dataforseo_status === "completed").length,
+        cityMonthlyVolume,
+        reportId,
+      ]
     );
 
     // Insert opportunity cards (fresh — no carry-over from previous runs)
     for (let i = 0; i < missed.length; i++) {
-      const text = cardTexts[i] ??
-        `${missed[i].suburb_name} has ${missed[i].monthly_volume} monthly searches — you are not visible here.`;
+      const suburb = missed[i];
+      const monthlyVolume = Number.isFinite(suburb.monthly_volume) ? Math.max(suburb.monthly_volume, 0) : 0;
+      const fallbackText = monthlyVolume > 0
+        ? `${suburb.suburb_name} has ${monthlyVolume} monthly searches — you are not visible here.`
+        : `${suburb.suburb_name} currently shows limited measured demand (0 searches/mo), and you are not visible there yet.`;
+      const text = monthlyVolume === 0 ? fallbackText : (cardTexts[i] ?? fallbackText);
       await execute(
         `INSERT INTO opportunity_cards
            (report_id, suburb_name, rank_position, monthly_volume, card_text, display_order)
          VALUES ($1,$2,$3,$4,$5,$6)`,
-        [reportId, missed[i].suburb_name, null, missed[i].monthly_volume, text, i]
+        [reportId, suburb.suburb_name, null, monthlyVolume, text, i]
       );
     }
 

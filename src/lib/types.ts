@@ -33,6 +33,7 @@ export interface SerpMapReport {
   business_name: string | null;
   keyword: string;
   city: string;
+  city_monthly_volume: number | null;
   business_lat: number | null;
   business_lng: number | null;
   business_address: string | null;

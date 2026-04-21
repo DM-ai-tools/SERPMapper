@@ -80,6 +80,7 @@ async function ensureCoreSchema(): Promise<void> {
     sql += `
 ALTER TABLE suburb_coordinates ADD COLUMN IF NOT EXISTS search_volumes JSONB DEFAULT '{}'::jsonb;
 ALTER TABLE serpmap_reports ADD COLUMN IF NOT EXISTS maps_search_query TEXT;
+ALTER TABLE serpmap_reports ADD COLUMN IF NOT EXISTS city_monthly_volume INTEGER;
 `;
     await getPool().query(sql);
   })();

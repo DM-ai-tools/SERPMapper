@@ -2,7 +2,7 @@ import { SerpMapResult, getRankBand, RANK_WEIGHTS } from "./types";
 
 /** Visibility means ranking in Google Maps top 20. */
 export function isVisiblePosition(position: number | null | undefined): boolean {
-  return position !== null && position !== undefined && position <= 20;
+  return Number.isFinite(position) && (position as number) >= 1 && (position as number) <= 20;
 }
 
 /**
@@ -26,11 +26,12 @@ export function calculateVisibilityScore(results: SerpMapResult[]): number {
   let totalPossible = 0;
 
   for (const result of results) {
+    const monthlyVolume = Number.isFinite(result.monthly_volume) ? Math.max(result.monthly_volume, 0) : 0;
     // Minimum floor of 0.1 ensures suburbs with 0 volume still contribute
     // when a business ranks there (instead of being completely ignored).
     const volumeWeight = useEqualWeight
       ? 1
-      : Math.max((result.monthly_volume || 0) / maxVolume, 0.1);
+      : Math.max(monthlyVolume / maxVolume, 0.1);
     const rankWeight = RANK_WEIGHTS[getRankBand(result.rank_position)];
 
     weightedSum += rankWeight * volumeWeight;
@@ -50,8 +51,11 @@ export function getTopMissedSuburbs(
   results: SerpMapResult[],
   limit = 5
 ): SerpMapResult[] {
-  return results
-    .filter((r) => !isVisiblePosition(r.rank_position))
+  const missed = results.filter((r) => !isVisiblePosition(r.rank_position));
+  const hasVolumeData = missed.some((r) => (r.monthly_volume || 0) > 0);
+
+  return missed
+    .filter((r) => !hasVolumeData || (r.monthly_volume || 0) > 0)
     .sort((a, b) => (b.monthly_volume || 0) - (a.monthly_volume || 0))
     .slice(0, limit);
 }

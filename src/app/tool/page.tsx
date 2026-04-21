@@ -220,6 +220,7 @@ function ToolPageInner() {
         total={30}
         checked={0}
         businessName={display}
+        city={cityParam}
       />
     );
   }

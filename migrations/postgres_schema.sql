@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS serpmap_reports (
   business_name     TEXT,
   keyword           TEXT NOT NULL,
   city              TEXT NOT NULL,
+  city_monthly_volume INTEGER,
   business_lat      DECIMAL(9,6),
   business_lng      DECIMAL(9,6),
   business_address  TEXT,

@@ -82,11 +82,29 @@ export interface DFSTaskResult {
 export interface DFSKeywordVolumeItem {
   keyword: string;
   search_volume?: number;
-  monthly_searches?: number;
+  monthly_searches?: number | Array<{
+    year?: number;
+    month?: number;
+    search_volume?: number;
+  }>;
   keyword_info?: {
     search_volume?: number;
-    monthly_searches?: number;
+    monthly_searches?: number | Array<{
+      year?: number;
+      month?: number;
+      search_volume?: number;
+    }>;
   };
+}
+
+export interface DFSKeywordVolumeLookupTask {
+  tag: string;
+  keyword: string;
+  location_name?: string | null;
+}
+
+export function normaliseVolumeKeyword(value: string): string {
+  return value.toLowerCase().replace(/\s+/g, " ").trim();
 }
 
 // ──────────────────────────────────────────────
@@ -168,20 +186,57 @@ export async function getKeywordVolumes(
   const rows = response.tasks?.[0]?.result ?? [];
   const map = new Map<string, number>();
   for (const row of rows) {
-    const key = (row.keyword ?? "").trim();
+    const key = normaliseVolumeKeyword(row.keyword ?? "");
     if (!key) continue;
-    const volume = Number(
-      row.search_volume ??
-      row.monthly_searches ??
-      row.keyword_info?.search_volume ??
-      row.keyword_info?.monthly_searches ??
-      NaN
-    );
-    if (Number.isFinite(volume)) {
+    const volume = extractKeywordVolume(row);
+    if (volume !== null) {
       map.set(key, volume);
     }
   }
   return map;
+}
+
+/**
+ * Query keyword volumes task-by-task with suburb location context.
+ * Returns Map<tag, volume> so caller can map results to suburbs.
+ */
+export async function getKeywordVolumesByLocationTasks(
+  tasks: DFSKeywordVolumeLookupTask[]
+): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  if (!tasks.length) return out;
+
+  const BATCH = 200;
+  for (let i = 0; i < tasks.length; i += BATCH) {
+    const slice = tasks.slice(i, i + BATCH);
+    const payload = slice.map((task) => ({
+      keywords: [normaliseVolumeKeyword(task.keyword)],
+      location_name: task.location_name?.trim() || undefined,
+      location_code: task.location_name?.trim() ? undefined : 2036,
+      language_code: "en",
+      tag: task.tag,
+    }));
+
+    const response = await dfsRequest<DFSApiResponse<unknown>>(
+      "POST",
+      "/keywords_data/google_ads/search_volume/live",
+      payload
+    );
+
+    const taskRows = response.tasks ?? [];
+    for (let idx = 0; idx < taskRows.length; idx++) {
+      const row = taskRows[idx];
+      const tag = row.data?.tag ?? slice[idx]?.tag;
+      if (!tag) continue;
+
+      const volume = extractKeywordVolumeFromUnknown(row.result);
+      if (volume !== null && volume > 0) {
+        out.set(tag, volume);
+      }
+    }
+  }
+
+  return out;
 }
 
 // ──────────────────────────────────────────────
@@ -246,7 +301,10 @@ export function findBusinessRank(
 
   for (const item of result.items ?? []) {
     const itemDomain = normaliseDomain(item.domain ?? item.url ?? "");
-    const hit = () => ({ position: item.rank_absolute, inLocalPack: item.rank_group <= 3 });
+    const hit = () => ({
+      position: normaliseRankPosition(item.rank_absolute),
+      inLocalPack: Number.isFinite(item.rank_group) && item.rank_group <= 3,
+    });
 
     // 1. Exact domain match (e.g. racv.com.au === racv.com.au)
     if (itemDomain && itemDomain === normUrl) return hit();
@@ -289,6 +347,75 @@ function normaliseDomain(url: string): string {
     .replace(/\/$/, "")
     .split("/")[0]
     .split("?")[0];
+}
+
+function normaliseRankPosition(value: unknown): number | null {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return null;
+  const int = Math.trunc(n);
+  return int >= 1 ? int : null;
+}
+
+function extractKeywordVolume(row: DFSKeywordVolumeItem): number | null {
+  const monthlySeries =
+    (Array.isArray(row.monthly_searches) ? row.monthly_searches : undefined) ??
+    (Array.isArray(row.keyword_info?.monthly_searches)
+      ? row.keyword_info?.monthly_searches
+      : undefined);
+
+  // Prefer the latest monthly datapoint when present.
+  if (monthlySeries?.length) {
+    const sorted = [...monthlySeries].sort((a, b) => {
+      const ay = Number(a.year ?? 0);
+      const by = Number(b.year ?? 0);
+      if (ay !== by) return by - ay;
+      return Number(b.month ?? 0) - Number(a.month ?? 0);
+    });
+
+    for (const point of sorted) {
+      const n = Number(point.search_volume);
+      if (Number.isFinite(n) && n >= 0) return Math.round(n);
+    }
+  }
+
+  const directCandidates = [
+    row.search_volume,
+    typeof row.monthly_searches === "number" ? row.monthly_searches : undefined,
+    row.keyword_info?.search_volume,
+    typeof row.keyword_info?.monthly_searches === "number"
+      ? row.keyword_info?.monthly_searches
+      : undefined,
+  ];
+
+  for (const candidate of directCandidates) {
+    const n = Number(candidate);
+    if (Number.isFinite(n) && n >= 0) return Math.round(n);
+  }
+
+  return null;
+}
+
+function extractKeywordVolumeFromUnknown(result: unknown): number | null {
+  if (!Array.isArray(result) || result.length === 0) return null;
+
+  const items: unknown[] = [];
+  for (const entry of result) {
+    if (!entry || typeof entry !== "object") continue;
+    const asObj = entry as Record<string, unknown>;
+    if (Array.isArray(asObj.items)) {
+      items.push(...asObj.items);
+    } else {
+      items.push(asObj);
+    }
+  }
+
+  for (const item of items) {
+    if (!item || typeof item !== "object") continue;
+    const volume = extractKeywordVolume(item as DFSKeywordVolumeItem);
+    if (volume !== null && volume > 0) return volume;
+  }
+
+  return null;
 }
 
 function levenshteinDistance(a: string, b: string): number {

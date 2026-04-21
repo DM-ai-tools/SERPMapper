@@ -204,7 +204,17 @@ export default function ReportView({
 
       {/* Full suburb table (unlocked only) */}
       {!isGated && results.length > 0 && (
-        <SuburbTable results={results} />
+        <div className="space-y-4">
+          <div className="w-full space-y-2">
+            <CitySearchVolumeCard report={report} results={results} />
+            <p className="text-xs text-slate-500 px-1">
+              <span className="font-semibold text-amber-700">⚠️ Data Availability Notice</span>{" "}
+              Search volume metrics in SERPMapper are available at the State and City level only.
+              Suburb-level data is not supported.
+            </p>
+          </div>
+          <SuburbTable results={results} city={report.city} />
+        </div>
       )}
     </div>
   );
@@ -229,9 +239,11 @@ function Stat({ value, label }: { value: string; label: string }) {
   );
 }
 
-function SuburbTable({ results }: { results: SerpMapResult[] }) {
+function SuburbTable({ results, city }: { results: SerpMapResult[]; city: string }) {
   const sorted = [...results].sort(
-    (a, b) => (b.monthly_volume || 0) - (a.monthly_volume || 0)
+    (a, b) =>
+      (a.rank_position ?? 999) - (b.rank_position ?? 999) ||
+      a.suburb_name.localeCompare(b.suburb_name)
   );
 
   return (
@@ -240,14 +252,14 @@ function SuburbTable({ results }: { results: SerpMapResult[] }) {
         <h2 className="font-bold text-slate-900">All suburbs</h2>
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className="w-full table-fixed text-sm">
           <thead className="bg-slate-50/90 text-slate-500 text-xs uppercase tracking-wide">
             <tr>
-              <th className="px-4 py-3 text-left">Suburb</th>
-              <th className="px-4 py-3 text-left">State</th>
-              <th className="px-4 py-3 text-right">Searches/mo</th>
-              <th className="px-4 py-3 text-right">Your Position</th>
-              <th className="px-4 py-3 text-left">Status</th>
+              <th className="px-5 py-3 text-center">Suburb</th>
+              <th className="px-5 py-3 text-center">City</th>
+              <th className="px-5 py-3 text-center">State</th>
+              <th className="px-5 py-3 text-center">Your Position</th>
+              <th className="px-5 py-3 text-center">Status</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-50">
@@ -255,15 +267,13 @@ function SuburbTable({ results }: { results: SerpMapResult[] }) {
               const { band } = getBandInfo(r.rank_position);
               return (
                 <tr key={r.result_id} className="hover:bg-slate-50/80 transition-colors">
-                  <td className="px-4 py-3 font-medium text-gray-900">{r.suburb_name}</td>
-                  <td className="px-4 py-3 text-gray-500">{r.suburb_state ?? "—"}</td>
-                  <td className="px-4 py-3 text-right text-gray-700">
-                    {r.monthly_volume > 0 ? r.monthly_volume.toLocaleString() : "—"}
-                  </td>
-                  <td className="px-4 py-3 text-right text-gray-700">
+                  <td className="px-5 py-3 text-center font-medium text-gray-900">{r.suburb_name}</td>
+                  <td className="px-5 py-3 text-center text-gray-500">{city}</td>
+                  <td className="px-5 py-3 text-center text-gray-500">{r.suburb_state ?? "—"}</td>
+                  <td className="px-5 py-3 text-center text-gray-700">
                     {r.rank_position ?? "—"}
                   </td>
-                  <td className="px-4 py-3">
+                  <td className="px-5 py-3 text-center">
                     <span
                       className="inline-flex items-center gap-1.5 text-xs font-medium rounded-full px-2.5 py-1"
                       style={{ backgroundColor: band.bg, color: band.text }}
@@ -278,6 +288,46 @@ function SuburbTable({ results }: { results: SerpMapResult[] }) {
           </tbody>
         </table>
       </div>
+    </div>
+  );
+}
+
+const STATE_FULL: Record<string, string> = {
+  VIC: "Victoria",
+  NSW: "New South Wales",
+  QLD: "Queensland",
+  WA: "Western Australia",
+  SA: "South Australia",
+  TAS: "Tasmania",
+  ACT: "Australian Capital Territory",
+  NT: "Northern Territory",
+};
+
+function CitySearchVolumeCard({
+  report,
+  results,
+}: {
+  report: SerpMapReport;
+  results: SerpMapResult[];
+}) {
+  const cityVolume =
+    Number.isFinite(report.city_monthly_volume) && Number(report.city_monthly_volume) >= 0
+      ? Number(report.city_monthly_volume)
+      : null;
+  const stateAbbr = (results.find((r) => r.suburb_state)?.suburb_state ?? "").toUpperCase();
+  const stateFull = STATE_FULL[stateAbbr] ?? stateAbbr;
+  const locationLabel = stateFull
+    ? `${report.city}, ${stateFull}, Australia`
+    : `${report.city}, Australia`;
+
+  return (
+    <div className="rounded-xl border border-slate-200/90 bg-white px-4 py-3 shadow-sm w-full">
+      <p className="text-xs uppercase tracking-wide text-slate-500 font-semibold">Number of searches</p>
+      <p className="mt-1 text-sm font-semibold text-slate-800">{locationLabel}</p>
+      <p className="mt-1.5 text-sm text-slate-600">
+        Searches for keyword "<span className="font-semibold text-slate-900">{report.keyword}</span>" ={" "}
+        <span className="font-bold text-brand-700">{cityVolume !== null ? cityVolume.toLocaleString() : "—"}</span>
+      </p>
     </div>
   );
 }

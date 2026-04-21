@@ -1,6 +1,10 @@
 import { execute, query } from "./db";
 import { SuburbCoordinate } from "./types";
-import { getKeywordVolumes } from "./dataforseo";
+import {
+  getKeywordVolumes,
+  getKeywordVolumesByLocationTasks,
+  normaliseVolumeKeyword,
+} from "./dataforseo";
 
 /**
  * Return all suburbs within `radiusKm` of (lat, lng).
@@ -72,21 +76,28 @@ export function getSuburbVolume(suburb: SuburbCoordinate, keyword: string): numb
  * Falls back to existing suburb static volume when live fetch/cache is unavailable.
  */
 export async function fetchLiveSuburbVolumes(
-  suburbs: Array<Pick<SuburbCoordinate, "suburb_id" | "name">>,
+  suburbs: Array<Pick<SuburbCoordinate, "suburb_id" | "name" | "dataforseo_location_name">>,
   keyword: string,
   fallbackRows?: SuburbCoordinate[]
 ): Promise<Map<string, number>> {
   const result = new Map<string, number>();
   if (!suburbs.length) return result;
 
-  const keywordBySuburb = new Map<string, string>();
-  const suburbByKeyword = new Map<string, string>();
+  const keywordsBySuburb = new Map<string, string[]>();
+  const allPhrases = new Set<string>();
   for (const s of suburbs) {
-    const phrase = `${keyword} ${s.name}`.replace(/\s+/g, " ").trim();
-    keywordBySuburb.set(s.suburb_id, phrase);
-    suburbByKeyword.set(phrase, s.suburb_id);
+    const phrases = [
+      `${keyword} ${s.name}`,
+      `${keyword} in ${s.name}`,
+      `${s.name} ${keyword}`,
+    ]
+      .map((p) => normaliseVolumeKeyword(p))
+      .filter(Boolean);
+    const uniquePhrases = Array.from(new Set(phrases));
+    keywordsBySuburb.set(s.suburb_id, uniquePhrases);
+    for (const phrase of uniquePhrases) allPhrases.add(phrase);
   }
-  const phrases = Array.from(suburbByKeyword.keys());
+  const phrases = Array.from(allPhrases);
   const nowIso = new Date().toISOString();
 
   // Ensure cache table exists (safe no-op when already present).
@@ -121,7 +132,14 @@ export async function fetchLiveSuburbVolumes(
     console.warn("[suburbs] keyword volume cache query failed:", e);
   }
 
-  const cacheMap = new Map<string, number>(cached.map((r) => [r.keyword, r.monthly_volume]));
+  // Treat 0/invalid cached values as non-authoritative to avoid "stuck at zero" volumes.
+  const cacheMap = new Map<string, number>();
+  for (const row of cached) {
+    const key = normaliseVolumeKeyword(row.keyword);
+    const vol = Number(row.monthly_volume);
+    if (!key || !Number.isFinite(vol) || vol <= 0) continue;
+    cacheMap.set(key, Math.round(vol));
+  }
   const missing = phrases.filter((p) => !cacheMap.has(p));
 
   // 2) Fetch missing phrases live from DataforSEO.
@@ -130,8 +148,9 @@ export async function fetchLiveSuburbVolumes(
       const liveMap = await getKeywordVolumes(missing);
       const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
       for (const kw of missing) {
-        const liveVol = liveMap.get(kw);
-        if (liveVol === undefined) continue; // No live value; keep fallback path.
+        const liveVolRaw = liveMap.get(normaliseVolumeKeyword(kw));
+        const liveVol = Number.isFinite(liveVolRaw) ? Math.max(0, Math.round(liveVolRaw as number)) : undefined;
+        if (liveVol === undefined || liveVol <= 0) continue; // Keep fallback path for zero/no-data.
 
         cacheMap.set(kw, liveVol);
         try {
@@ -164,16 +183,101 @@ export async function fetchLiveSuburbVolumes(
   }
 
   for (const s of suburbs) {
-    const phrase = keywordBySuburb.get(s.suburb_id);
-    if (!phrase) {
-      result.set(s.suburb_id, fallbackBySuburb.get(s.suburb_id) ?? 0);
+    const phrasesForSuburb = keywordsBySuburb.get(s.suburb_id) ?? [];
+    const fallbackVol = fallbackBySuburb.get(s.suburb_id);
+    if (!phrasesForSuburb.length) {
+      result.set(s.suburb_id, fallbackVol && fallbackVol > 0 ? fallbackVol : 0);
       continue;
     }
+    const bestLiveVol = phrasesForSuburb.reduce((best, phrase) => {
+      const vol = cacheMap.get(phrase);
+      if (!Number.isFinite(vol) || (vol as number) <= 0) return best;
+      return Math.max(best, vol as number);
+    }, 0);
     result.set(
       s.suburb_id,
-      cacheMap.get(phrase) ?? fallbackBySuburb.get(s.suburb_id) ?? 0
+      bestLiveVol > 0
+        ? bestLiveVol
+        : (fallbackVol && fallbackVol > 0 ? fallbackVol : 0)
     );
   }
+
+  // 4) For remaining zero values, query DataforSEO with suburb location context.
+  const zeroSuburbs = suburbs.filter((s) => (result.get(s.suburb_id) ?? 0) <= 0);
+  if (zeroSuburbs.length > 0) {
+    const lookupTasks = zeroSuburbs.flatMap((s) => {
+      const locationName = s.dataforseo_location_name?.trim() || undefined;
+      const phrases = keywordsBySuburb.get(s.suburb_id) ?? [];
+      return phrases.map((phrase, idx) => ({
+        tag: `${s.suburb_id}__${idx}`,
+        keyword: phrase,
+        location_name: locationName,
+      }));
+    });
+
+    try {
+      const liveByTag = await getKeywordVolumesByLocationTasks(lookupTasks);
+      const bestBySuburb = new Map<string, number>();
+      liveByTag.forEach((vol, tag) => {
+        const suburbId = tag.split("__")[0];
+        if (!suburbId) return;
+        const prev = bestBySuburb.get(suburbId) ?? 0;
+        if (vol > prev) bestBySuburb.set(suburbId, vol);
+      });
+      bestBySuburb.forEach((vol, suburbId) => {
+        if (vol > 0) result.set(suburbId, vol);
+      });
+    } catch (e) {
+      console.warn("[suburbs] location-aware keyword volumes failed:", e);
+    }
+  }
+
+  // 5) If live/fallback is too sparse (e.g. only city term has volume), infer
+  //    non-zero suburb volumes from base keyword demand so ranked suburbs don't
+  //    look impossible (position with 0/mo).
+  const resolved = Array.from(result.values());
+  const positiveCount = resolved.filter((v) => Number.isFinite(v) && v > 0).length;
+  const sparseThreshold = Math.max(1, Math.floor(suburbs.length * 0.1)); // <=10% positive = sparse
+
+  if (positiveCount <= sparseThreshold) {
+    try {
+      const baseMap = await getKeywordVolumes([normaliseVolumeKeyword(keyword)]);
+      const baseKeywordVolume = baseMap.get(normaliseVolumeKeyword(keyword)) ?? 0;
+      if (baseKeywordVolume > 0) {
+        const zeroSuburbs = suburbs.filter((s) => (result.get(s.suburb_id) ?? 0) <= 0);
+        if (zeroSuburbs.length > 0) {
+          const popBySuburb = new Map<string, number>();
+          if (fallbackRows?.length) {
+            for (const row of fallbackRows) {
+              const sid = String(row.suburb_id);
+              const pop = Number(row.population ?? 0);
+              if (sid && Number.isFinite(pop) && pop > 0) {
+                popBySuburb.set(sid, pop);
+              }
+            }
+          }
+          const totalPop = zeroSuburbs.reduce(
+            (sum, s) => sum + (popBySuburb.get(s.suburb_id) ?? 0),
+            0
+          );
+
+          // If we don't have population data, don't assign identical values.
+          if (totalPop <= 0) {
+            return result;
+          }
+
+          for (const s of zeroSuburbs) {
+            const ratio = (popBySuburb.get(s.suburb_id) ?? 0) / totalPop;
+            const estimated = Math.max(1, Math.round(baseKeywordVolume * ratio));
+            result.set(s.suburb_id, estimated);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("[suburbs] inferred volume fallback failed:", e);
+    }
+  }
+
   return result;
 }
 

@@ -7,6 +7,7 @@ interface ProcessingStateProps {
   checked: number;
   businessName?: string | null;
   suburbNames?: string[];
+  city?: string;
 }
 
 const MESSAGES = [
@@ -59,11 +60,47 @@ const DEMO_SUBURBS = [
   "Surry Hills",
 ];
 
+const CITY_SUBURB_PRESETS: Record<string, string[]> = {
+  melbourne: [
+    "Melbourne", "Richmond", "Hawthorn", "Fitzroy", "Collingwood", "Carlton",
+    "South Yarra", "Prahran", "St Kilda", "Brighton", "Elwood", "Bentleigh",
+    "Caulfield", "Malvern", "Armadale", "Toorak", "South Melbourne",
+    "Port Melbourne", "Williamstown", "Footscray", "Yarraville", "Spotswood",
+    "Newport", "Altona", "Sunshine", "Deer Park", "Hoppers Crossing", "Werribee",
+  ],
+  sydney: [
+    "Sydney", "Parramatta", "Bondi", "Manly", "Chatswood", "Newtown",
+    "Surry Hills", "Pyrmont", "Glebe", "Marrickville", "Burwood",
+    "Strathfield", "North Sydney", "Lane Cove", "Hornsby", "Liverpool",
+    "Blacktown", "Penrith", "Cronulla", "Hurstville", "Bankstown", "Mascot",
+  ],
+  brisbane: [
+    "Brisbane", "South Brisbane", "Fortitude Valley", "Toowong", "Indooroopilly",
+    "Chermside", "Sunnybank", "Carindale", "Coorparoo", "West End", "Milton",
+    "Paddington", "Nundah", "Banyo", "Logan City", "Beenleigh", "Browns Plains",
+  ],
+  perth: [
+    "Perth", "Subiaco", "Leederville", "North Perth", "Mount Lawley",
+    "Maylands", "Belmont", "Victoria Park", "Cottesloe", "Scarborough",
+    "Innaloo", "Joondalup", "Midland", "Cannington", "Fremantle", "Rockingham",
+  ],
+  adelaide: [
+    "Adelaide", "Glenelg", "Norwood", "Unley", "Prospect", "Mitcham",
+    "Burnside", "Campbelltown", "Port Adelaide", "Semaphore", "Salisbury",
+    "Elizabeth", "Marion", "Morphett Vale", "Noarlunga", "Gawler",
+  ],
+  canberra: [
+    "Canberra", "Belconnen", "Gungahlin", "Tuggeranong", "Woden", "Bruce",
+    "Phillip", "Braddon", "Kingston", "Barton", "Ainslie", "Lyneham",
+  ],
+};
+
 export default function ProcessingState({
   total,
   checked,
   businessName,
   suburbNames,
+  city,
 }: ProcessingStateProps) {
   const [msgIdx, setMsgIdx] = useState(0);
 
@@ -105,9 +142,16 @@ export default function ProcessingState({
   }, [displayChecked, total]);
 
   const chipList = useMemo(() => {
-    const list = suburbNames && suburbNames.length > 0 ? suburbNames : DEMO_SUBURBS;
+    const cityKey = (city ?? "").trim().toLowerCase();
+    const cityPreset = cityKey ? CITY_SUBURB_PRESETS[cityKey] : undefined;
+    const list =
+      suburbNames && suburbNames.length > 0
+        ? suburbNames
+        : cityPreset && cityPreset.length > 0
+        ? cityPreset
+        : DEMO_SUBURBS;
     return list.slice(0, Math.min(list.length, displayChecked));
-  }, [suburbNames, displayChecked]);
+  }, [suburbNames, city, displayChecked]);
 
   const HEX_ROWS = 5;
   const HEX_COLS = 7;
