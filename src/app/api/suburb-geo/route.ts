@@ -33,7 +33,7 @@ export async function POST(req: NextRequest) {
       const lat = typeof r.lat === "number" ? r.lat : Number(r.lat);
       const lng = typeof r.lng === "number" ? r.lng : Number(r.lng);
       return {
-        suburb_id: r.suburb_id,
+        suburb_id: String(r.suburb_id).trim().toLowerCase(),
         lat: Number.isFinite(lat) ? lat : null,
         lng: Number.isFinite(lng) ? lng : null,
         geojson_polygon: r.geojson_polygon,

@@ -49,12 +49,18 @@ type LayerHandle =
   | import("leaflet").GeoJSON
   | import("leaflet").Circle;
 
-/** Approximate suburb footprint when `geojson_polygon` is NULL (typical for lat/lng-only seeds). */
-const FALLBACK_SUBURB_RADIUS_METERS = 2200;
+/** Approximate footprint when no polygon — keep modest so dense metros don’t look like one blob. */
+const FALLBACK_SUBURB_RADIUS_METERS = 1100;
 
 // ─────────────────────────────────────────────────────────────
 // Helper: build tooltip HTML for a suburb result
 // ─────────────────────────────────────────────────────────────
+/** UUID / id keys must match between client results and /api/suburb-geo (pg often lowercases UUIDs). */
+function normSid(id: string | null | undefined): string {
+  if (id == null || id === "") return "";
+  return String(id).trim().toLowerCase();
+}
+
 function tooltipHtml(result: SerpMapResult): string {
   const posText = result.rank_position
     ? `Position #${result.rank_position}${result.is_in_local_pack ? " (Local Pack)" : ""}`
@@ -102,6 +108,7 @@ export default function VisibilityMap({
   const isPartialRef = useRef(isPartial);
   // Maps result_id → Leaflet layer (GeoJSON polygon or metre-based Circle fallback)
   const layersRef = useRef<Map<string, LayerHandle>>(new Map());
+  const didAutoFitRef = useRef(false);
 
   // ── Fetch GeoJSON polygons for a batch of suburb_ids ─────────
   const fetchPolygons = useCallback(
@@ -120,7 +127,7 @@ export default function VisibilityMap({
           await res.json();
         return Object.fromEntries(
           data.map((d) => [
-            d.suburb_id,
+            normSid(d.suburb_id),
             {
               polygon: d.geojson_polygon ?? undefined,
               lat: toNumberOrUndefined(d.lat),
@@ -160,16 +167,27 @@ export default function VisibilityMap({
       );
       if (pending.length === 0) return;
 
-      const suburbIdsToFetch = Array.from(new Set(pending.map((r) => r.suburb_id!)));
+      const suburbIdsToFetch = Array.from(
+        new Set(pending.map((r) => normSid(r.suburb_id)).filter(Boolean))
+      );
 
       fetchPolygons(suburbIdsToFetch).then((geoMap) => {
         if (!mapInstanceRef.current || !L) return;
+
+        const map = mapInstanceRef.current;
+        let combinedBounds: import("leaflet").LatLngBounds | null = null;
+        const extendBounds = (lat: number, lng: number) => {
+          const ll = L!.latLng(lat, lng);
+          if (!combinedBounds) combinedBounds = L!.latLngBounds(ll, ll);
+          else combinedBounds.extend(ll);
+        };
+        extendBounds(businessLat, businessLng);
 
         for (const result of pending) {
           if (!result.suburb_id) continue;
           if (layersRef.current.has(result.result_id)) continue;
 
-          const geo = geoMap[result.suburb_id];
+          const geo = geoMap[normSid(result.suburb_id)];
           if (!geo) continue;
 
           const band = getRankBand(result.rank_position);
@@ -192,8 +210,17 @@ export default function VisibilityMap({
                 });
               },
             });
-            geoLayer.addTo(mapInstanceRef.current);
+            geoLayer.addTo(map);
             layersRef.current.set(result.result_id, geoLayer);
+            try {
+              const gb = geoLayer.getBounds();
+              if (gb.isValid()) {
+                if (!combinedBounds) combinedBounds = gb;
+                else combinedBounds.extend(gb);
+              }
+            } catch {
+              /* ignore */
+            }
           } else if (geo.lat != null && geo.lng != null) {
             const lat = Number(geo.lat);
             const lng = Number(geo.lng);
@@ -207,19 +234,40 @@ export default function VisibilityMap({
               opacity: 1,
               className: "serp-tooltip",
             });
-            circle.addTo(mapInstanceRef.current);
+            circle.addTo(map);
             layersRef.current.set(result.result_id, circle);
+            try {
+              const cb = circle.getBounds();
+              if (cb.isValid()) {
+                if (!combinedBounds) combinedBounds = cb;
+                else combinedBounds.extend(cb);
+              }
+            } catch {
+              /* ignore */
+            }
           }
         }
 
-        mapInstanceRef.current.invalidateSize();
+        map.invalidateSize();
         layersRef.current.forEach((layer) => {
           const path = layer as import("leaflet").Path & { redraw?: () => void };
           if (typeof path.redraw === "function") path.redraw();
         });
+
+        // Frame business + suburbs so rings aren’t all visually piled on the centre.
+        const addedInThisPass = pending.filter((r) => layersRef.current.has(r.result_id)).length;
+        if (
+          !didAutoFitRef.current &&
+          addedInThisPass > 0 &&
+          combinedBounds &&
+          combinedBounds.isValid()
+        ) {
+          didAutoFitRef.current = true;
+          map.fitBounds(combinedBounds, { padding: [40, 48], maxZoom: 13 });
+        }
       });
     },
-    [fetchPolygons]
+    [fetchPolygons, businessLat, businessLng]
   );
 
   // ── Keep refs in sync with latest props ──────────────────────
@@ -299,6 +347,7 @@ export default function VisibilityMap({
     });
 
     return () => {
+      didAutoFitRef.current = false;
       mapInstanceRef.current?.remove();
       mapInstanceRef.current = null;
       layersRef.current.clear();
@@ -385,11 +434,8 @@ function MapLegend() {
         </div>
       ))}
       <p className="text-[10px] text-gray-500 leading-snug pt-1 border-t border-gray-100 mt-1">
-        <strong className="text-gray-600">Boundaries:</strong> real suburb shapes need{" "}
-        <code className="text-[9px] bg-gray-100 px-0.5 rounded">geojson_polygon</code> in Postgres (run{" "}
-        <code className="text-[9px] bg-gray-100 px-0.5 rounded">npm run backfill:polygons</code> on Railway
-        with <code className="text-[9px] bg-gray-100 px-0.5 rounded">NOMINATIM_CONTACT_EMAIL</code>
-        set). Until then, overlaps use soft tint (not a continuous heat raster).
+        Each suburb is centred on its real coordinates; rings scale when you zoom. True outlines need{" "}
+        <code className="text-[9px] bg-gray-100 px-0.5 rounded">npm run backfill:polygons</code>.
       </p>
     </div>
   );
