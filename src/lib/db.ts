@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Pool } from "pg";
 
-import defaultSuburbSeed from "@/data/australia-suburbs-seed.json";
+import defaultSuburbSeed from "@/lib/australia-suburbs-seed.json";
 
 // Singleton pool — reused across hot-reloads in dev
 declare global {
