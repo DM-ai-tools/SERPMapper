@@ -33,7 +33,10 @@ function canonicalPlaceId(raw: string): string {
 
 /**
  * Resolve a business URL to its Google Places record.
- * Does NOT fall back to “first result for Melbourne” — that was wrong for every other domain.
+ * Strategy order:
+ * 1) brand + city
+ * 2) full domain + city
+ * 3) city centre fallback
  */
 export async function resolveBusinessFromUrl(
   url: string,
@@ -44,56 +47,18 @@ export async function resolveBusinessFromUrl(
 
   const domain = normaliseDomain(url);
   const cityTrim = city.trim();
-  const brandGuess = guessBrandFromDomain(domain);
-  const labelTokens = tokensFromDomainLabel(domain.split(".")[0] ?? domain);
-  const tokenPhrase = labelTokens.length ? labelTokens.join(" ") : brandGuess;
 
-  const geo = await cityCenterForBias(cityTrim, apiKey);
-  const bias =
-    geo != null && isValidLatLng(geo.lat, geo.lng)
-      ? {
-          circle: {
-            center: { latitude: geo.lat, longitude: geo.lng },
-            // Meters; keep strictly below 50_000 — some keys reject the inclusive max.
-            radius: 40_000,
-          },
-        }
-      : undefined;
+  // Strategy 1: Brand name extracted from domain + city.
+  const brand = domain.split(".")[0].replace(/-/g, " ");
+  const business = await searchPlaces(`${brand} ${cityTrim} Australia`, apiKey);
+  if (business) return business;
 
-  const queries = [
-    `${domain} ${cityTrim} Australia`,
-    `${brandGuess} ${cityTrim} Australia`,
-    `${domain} Australia`,
-    ...(tokenPhrase !== brandGuess
-      ? [`${tokenPhrase} ${cityTrim} Australia`, `${tokenPhrase} Australia`]
-      : []),
-  ];
+  // Strategy 2: Full domain + city.
+  const business2 = await searchPlaces(`${domain} ${cityTrim} Australia`, apiKey);
+  if (business2) return business2;
 
-  const byId = new Map<string, PlaceRow>();
-  for (const q of queries) {
-    const rows = await searchTextPlaces(q, apiKey, bias);
-    for (const p of rows) {
-      const k = canonicalPlaceId(p.id);
-      if (k) byId.set(k, p);
-    }
-  }
-
-  const candidates = Array.from(byId.values());
-  const best = pickBestCandidate(candidates, domain, brandGuess, cityTrim, labelTokens);
-  if (!best) return null;
-
-  const lat = best.location?.latitude;
-  const lng = best.location?.longitude;
-  if (lat === undefined || lng === undefined) return null;
-
-  return {
-    name: best.displayName?.text ?? brandGuess,
-    address: best.formattedAddress ?? `${cityTrim}, Australia`,
-    lat,
-    lng,
-    placeId: canonicalPlaceId(best.id),
-    websiteUri: best.websiteUri ?? null,
-  };
+  // Strategy 3: City centre fallback.
+  return searchPlaces(`${cityTrim} city centre Australia`, apiKey, cityTrim);
 }
 
 interface PlaceRow {
@@ -102,6 +67,48 @@ interface PlaceRow {
   formattedAddress?: string;
   location?: { latitude?: number; longitude?: number };
   websiteUri?: string;
+}
+
+async function searchPlaces(
+  textQuery: string,
+  apiKey: string,
+  cityForBias?: string
+): Promise<BusinessInfo | null> {
+  let bias:
+    | {
+        circle: {
+          center: { latitude: number; longitude: number };
+          radius: number;
+        };
+      }
+    | undefined;
+
+  if (cityForBias?.trim()) {
+    const geo = await cityCenterForBias(cityForBias, apiKey);
+    if (geo && isValidLatLng(geo.lat, geo.lng)) {
+      bias = {
+        circle: {
+          center: { latitude: geo.lat, longitude: geo.lng },
+          radius: 40_000,
+        },
+      };
+    }
+  }
+
+  const rows = await searchTextPlaces(textQuery, apiKey, bias);
+  const best = rows[0];
+  const lat = best?.location?.latitude;
+  const lng = best?.location?.longitude;
+  if (!best || lat === undefined || lng === undefined) return null;
+
+  return {
+    name: best.displayName?.text ?? textQuery,
+    address: best.formattedAddress ?? "Australia",
+    lat,
+    lng,
+    placeId: canonicalPlaceId(best.id),
+    websiteUri: best.websiteUri ?? null,
+  };
 }
 
 async function searchTextPlaces(
