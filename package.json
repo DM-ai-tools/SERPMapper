@@ -9,7 +9,8 @@
     "lint": "node ./node_modules/next/dist/bin/next lint",
     "typecheck": "tsc --noEmit",
     "verify-places": "node scripts/verify-google-places.mjs",
-    "smoke-analyze": "node scripts/smoke-analyze.mjs"
+    "smoke-analyze": "node scripts/smoke-analyze.mjs",
+    "backfill:polygons": "node scripts/backfill-geojson-nominatim.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.36.3",

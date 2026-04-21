@@ -74,13 +74,13 @@ function tooltipHtml(result: SerpMapResult): string {
 // ─────────────────────────────────────────────────────────────
 // Helper: polygon style
 // ─────────────────────────────────────────────────────────────
-function polygonStyle(color: string, weight = 1) {
+function polygonStyle(color: string, weight = 0.75) {
   return {
     fillColor: color,
-    fillOpacity: 0.5,
+    fillOpacity: 0.38,
     color: color,
     weight,
-    opacity: 0.8,
+    opacity: 0.85,
   };
 }
 
@@ -341,6 +341,10 @@ export default function VisibilityMap({
 
       {/* Tooltip styles injected inline — avoids needing a separate CSS file */}
       <style>{`
+        /* Softer “heat” where suburb areas overlap (Leaflet SVG paths) */
+        .leaflet-overlay-pane svg path {
+          mix-blend-mode: multiply;
+        }
         .serp-tooltip {
           background: white;
           border: 1px solid #e5e7eb;
@@ -381,8 +385,11 @@ function MapLegend() {
         </div>
       ))}
       <p className="text-[10px] text-gray-500 leading-snug pt-1 border-t border-gray-100 mt-1">
-        Areas: real suburb outlines when <code className="text-[9px] bg-gray-100 px-0.5 rounded">geojson_polygon</code>{" "}
-        is in the database (ABS seed). Otherwise ~2.2 km circles — size follows the map when you zoom.
+        <strong className="text-gray-600">Boundaries:</strong> real suburb shapes need{" "}
+        <code className="text-[9px] bg-gray-100 px-0.5 rounded">geojson_polygon</code> in Postgres (run{" "}
+        <code className="text-[9px] bg-gray-100 px-0.5 rounded">npm run backfill:polygons</code> on Railway
+        with <code className="text-[9px] bg-gray-100 px-0.5 rounded">NOMINATIM_CONTACT_EMAIL</code>
+        set). Until then, overlaps use soft tint (not a continuous heat raster).
       </p>
     </div>
   );
