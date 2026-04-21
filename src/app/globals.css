@@ -6,9 +6,9 @@
 @tailwind utilities;
 
 :root {
-  --page-bg: #f4f7fb;
+  --page-bg: #f6f7f9;
   --surface: #ffffff;
-  --ring-brand: rgba(22, 163, 74, 0.35);
+  --ring-brand: rgba(130, 204, 60, 0.32);
 }
 
 html {
@@ -24,14 +24,21 @@ html {
 body {
   font-family: var(--font-sans);
   background-color: var(--page-bg);
-  color: #0f172a;
+  color: #111827;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
 }
 
+h1,
+h2,
+h3 {
+  font-family: var(--font-display), var(--font-sans), sans-serif;
+  letter-spacing: -0.015em;
+}
+
 ::selection {
-  background-color: rgba(22, 163, 74, 0.18);
+  background-color: rgba(130, 204, 60, 0.2);
   color: #0f172a;
 }
 
@@ -52,11 +59,11 @@ body {
 
 /* Hero & section backgrounds — soft mesh (no images required) */
 .bg-mesh-hero {
-  background-color: #f4f7fb;
+  background-color: #f6f7f9;
   background-image:
-    radial-gradient(ellipse 90% 60% at 50% -10%, rgba(187, 247, 208, 0.55), transparent),
-    radial-gradient(ellipse 70% 50% at 100% 0%, rgba(134, 239, 172, 0.35), transparent),
-    radial-gradient(ellipse 60% 45% at 0% 30%, rgba(240, 253, 244, 0.95), transparent);
+    radial-gradient(ellipse 90% 60% at 50% -10%, rgba(209, 250, 174, 0.42), transparent),
+    radial-gradient(ellipse 70% 50% at 100% 0%, rgba(233, 255, 212, 0.34), transparent),
+    radial-gradient(ellipse 60% 45% at 0% 30%, rgba(255, 255, 255, 0.95), transparent);
 }
 
 .bg-mesh-section {
@@ -79,9 +86,9 @@ body {
 @layer components {
   .btn-primary-live {
     @apply relative overflow-hidden font-semibold text-white rounded-xl transition-all duration-300;
-    @apply bg-gradient-to-b from-brand-500 to-brand-700 shadow-glow-brand shadow-inner-light;
-    @apply hover:from-brand-500 hover:to-brand-800 hover:shadow-xl hover:-translate-y-0.5;
-    @apply active:translate-y-0 active:shadow-md;
+    @apply bg-brand-500 shadow-sm;
+    @apply hover:bg-brand-600 hover:-translate-y-0.5;
+    @apply active:translate-y-0 active:shadow-sm;
   }
 
   .btn-primary-live::after {
@@ -125,7 +132,6 @@ body {
   }
 
   .card-elevated {
-    @apply bg-white/90 backdrop-blur-sm rounded-2xl border border-gray-200/80 shadow-card;
-    @apply shadow-[0_1px_0_0_rgba(255,255,255,0.8)_inset];
+    @apply bg-white rounded-2xl border border-slate-200/90 shadow-[0_1px_2px_rgba(15,23,42,0.05),0_10px_28px_-18px_rgba(15,23,42,0.2)];
   }
 }

@@ -11,17 +11,17 @@ const config: Config = {
       colors: {
         // SERPMapper primary brand colour — green
         brand: {
-          50: "#F0FDF4",
-          100: "#DCFCE7",
-          200: "#BBF7D0",
-          300: "#86EFAC",
-          400: "#4ADE80",
-          500: "#22C55E",
-          600: "#16A34A",
-          700: "#15803D",
-          800: "#166534",
-          900: "#14532D",
-          950: "#052E16",
+          50: "#F7FDEA",
+          100: "#EFFAD6",
+          200: "#E0F4B5",
+          300: "#C9EA84",
+          400: "#AEE15B",
+          500: "#82CC3C",
+          600: "#6AAE2D",
+          700: "#548D24",
+          800: "#46721F",
+          900: "#3D5F1F",
+          950: "#1E310D",
         },
         // Rank-band colours — used by map polygons, legend, and suburb table badges
         rank: {
@@ -33,14 +33,8 @@ const config: Config = {
         },
       },
       fontFamily: {
-        sans: [
-          "ui-sans-serif",
-          "system-ui",
-          "-apple-system",
-          "BlinkMacSystemFont",
-          '"Segoe UI"',
-          "sans-serif",
-        ],
+        sans: ["var(--font-sans)", "ui-sans-serif", "system-ui", "sans-serif"],
+        display: ["var(--font-display)", "var(--font-sans)", "ui-sans-serif", "system-ui", "sans-serif"],
       },
       boxShadow: {
         card: "0 1px 2px rgba(15, 23, 42, 0.04), 0 12px 40px -12px rgba(15, 23, 42, 0.1)",

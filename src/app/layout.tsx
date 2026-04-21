@@ -1,10 +1,18 @@
 import type { Metadata } from "next";
-import { Plus_Jakarta_Sans } from "next/font/google";
+import { Inter, Montserrat } from "next/font/google";
 import "./globals.css";
 
-const sans = Plus_Jakarta_Sans({
+const sans = Inter({
   subsets: ["latin"],
   display: "swap",
+  variable: "--font-sans",
+});
+
+const display = Montserrat({
+  subsets: ["latin"],
+  display: "swap",
+  variable: "--font-display",
+  weight: ["600", "700", "800"],
 });
 
 export const metadata: Metadata = {
@@ -47,16 +55,16 @@ export default function RootLayout({
         {/* Leaflet CSS loaded via globals.css import */}
       </head>
       <body
-        className={`${sans.className} min-h-screen flex flex-col antialiased text-slate-900 bg-[var(--page-bg)]`}
+        className={`${sans.variable} ${display.variable} ${sans.className} min-h-screen flex flex-col antialiased text-slate-900 bg-[var(--page-bg)]`}
       >
-        <header className="sticky top-0 z-50 border-b border-slate-200/80 bg-white/75 backdrop-blur-md supports-[backdrop-filter]:bg-white/65 shadow-sm shadow-slate-900/[0.04]">
+        <header className="sticky top-0 z-50 border-b border-slate-200/80 bg-white/95 supports-[backdrop-filter]:bg-white/90">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-14 md:h-16 flex items-center justify-between gap-3">
             <a
               href="/"
               className="flex items-center gap-2 group"
               aria-label="SERPMapper home"
             >
-              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-brand-500 to-brand-700 text-white shadow-md shadow-brand-600/25 ring-1 ring-white/20">
+              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-600 text-white ring-1 ring-brand-700/25">
                 <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" aria-hidden>
                   <path
                     d="M12 3L4 8v8l8 5 8-5V8l-8-5z"
@@ -87,7 +95,7 @@ export default function RootLayout({
                 href="https://trafficradius.com.au/contact-us/"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center justify-center rounded-xl bg-gradient-to-b from-brand-500 to-brand-700 px-3.5 py-2 md:px-4 md:py-2.5 text-xs md:text-sm font-semibold text-white shadow-md shadow-brand-600/30 ring-1 ring-white/15 transition-all duration-200 hover:shadow-lg hover:shadow-brand-600/35 hover:-translate-y-0.5 active:translate-y-0 whitespace-nowrap"
+                className="inline-flex items-center justify-center rounded-full bg-brand-500 px-3.5 py-2 md:px-4 md:py-2.5 text-xs md:text-sm font-semibold text-white transition-colors duration-200 hover:bg-brand-600 whitespace-nowrap"
               >
                 Strategic call
               </a>
