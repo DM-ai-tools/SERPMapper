@@ -103,7 +103,10 @@ export async function POST(req: NextRequest) {
 
     if (suburbs.length === 0) {
       return NextResponse.json(
-        { error: "No suburbs found within the specified radius." },
+        {
+          error:
+            "No suburbs found within the specified radius. Ensure suburb data exists in the database (latest deploy auto-seeds an empty table) or run: node scripts/seed-all-australia.js",
+        },
         { status: 422 }
       );
     }

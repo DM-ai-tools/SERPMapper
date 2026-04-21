@@ -2,6 +2,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Pool } from "pg";
 
+import defaultSuburbSeed from "@/data/australia-suburbs-seed.json";
+
 // Singleton pool — reused across hot-reloads in dev
 declare global {
   // eslint-disable-next-line no-var
@@ -18,6 +20,13 @@ declare global {
   // eslint-disable-next-line no-var
   var _pgMigration: Promise<void> | undefined;
 }
+
+declare global {
+  // eslint-disable-next-line no-var
+  var _pgSuburbSeed: Promise<void> | undefined;
+}
+
+type SuburbSeedRow = readonly [string, string, string, number, number];
 
 function createPool(): Pool {
   if (!process.env.DATABASE_URL) {
@@ -79,11 +88,51 @@ ALTER TABLE serpmap_reports ADD COLUMN IF NOT EXISTS maps_search_query TEXT;
 }
 
 /**
+ * Fresh Railway DBs have tables but no rows — getSuburbsInRadius() would return nothing.
+ * Seed the same ~420 suburbs as scripts/seed-all-australia.js (one-time when table is empty).
+ */
+async function ensureDefaultSuburbSeed(): Promise<void> {
+  if (global._pgSuburbSeed) return global._pgSuburbSeed;
+
+  global._pgSuburbSeed = (async () => {
+    const countRow = await queryOne<{ c: string }>(
+      "SELECT count(*)::text AS c FROM suburb_coordinates"
+    );
+    if (Number(countRow?.c ?? 0) > 0) return;
+
+    const rows = defaultSuburbSeed as unknown as SuburbSeedRow[];
+    console.info(
+      `[db] suburb_coordinates is empty — inserting ${rows.length} default Australian suburbs`
+    );
+
+    const batchSize = 80;
+    for (let i = 0; i < rows.length; i += batchSize) {
+      const batch = rows.slice(i, i + batchSize);
+      const parts: string[] = [];
+      const params: unknown[] = [];
+      batch.forEach((r, idx) => {
+        const o = idx * 5;
+        parts.push(`($${o + 1}, $${o + 2}, $${o + 3}, $${o + 4}, $${o + 5})`);
+        params.push(r[0], r[1], r[2], r[3], r[4]);
+      });
+      await execute(
+        `INSERT INTO suburb_coordinates (name, state, postcode, lat, lng) VALUES ${parts.join(", ")}
+         ON CONFLICT (name, state) DO NOTHING`,
+        params
+      );
+    }
+  })();
+
+  return global._pgSuburbSeed;
+}
+
+/**
  * Ensure tables exist (fresh DB) and optional column upgrades (OTP on leads).
  * Call after confirming DATABASE_URL is set, before other queries.
  */
 export async function ensureDatabaseReady(): Promise<void> {
   await ensureCoreSchema();
+  await ensureDefaultSuburbSeed();
   if (!global._pgMigration) {
     global._pgMigration = (async () => {
       try {
@@ -98,7 +147,7 @@ export async function ensureDatabaseReady(): Promise<void> {
       }
     })();
   }
-  return global._pgMigration;
+  await global._pgMigration;
 }
 
 /** @deprecated Use ensureDatabaseReady — same behavior */
