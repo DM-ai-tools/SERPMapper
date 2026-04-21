@@ -79,12 +79,9 @@ export default function RootLayout({
                 <a href="/#how-it-works" className="nav-link-underline px-3 py-2 rounded-lg">
                   How it works
                 </a>
-                <a href="/blog" className="nav-link-underline px-3 py-2 rounded-lg">
-                  Blog
-                </a>
               </nav>
               <a
-                href="https://googleads.trafficradius.com.au/"
+                href="https://trafficradius.com.au/contact-us/"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center justify-center rounded-xl bg-gradient-to-b from-brand-500 to-brand-700 px-3.5 py-2 md:px-4 md:py-2.5 text-xs md:text-sm font-semibold text-white shadow-md shadow-brand-600/30 ring-1 ring-white/15 transition-all duration-200 hover:shadow-lg hover:shadow-brand-600/35 hover:-translate-y-0.5 active:translate-y-0 whitespace-nowrap"

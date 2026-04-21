@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { query, queryOne, execute, insertReturning } from "@/lib/db";
 import { resolveBusinessFromUrl } from "@/lib/places";
-import { getSuburbsInRadius, getSuburbVolume } from "@/lib/suburbs";
+import { fetchLiveSuburbVolumes, getSuburbsInRadius } from "@/lib/suburbs";
 import { getLiveResults, findBusinessRank, DFSTaskPostRequest } from "@/lib/dataforseo";
 import {
   generateVisibilitySummary,
@@ -126,19 +126,28 @@ export async function POST(req: NextRequest) {
     const reportId = report.report_id;
 
     // ──────────────────────────────────────────
-    // 6. Create result placeholder rows (one per unique suburb)
+    // 6. Resolve suburb monthly volumes (live via DataforSEO Keywords Data + cache)
+    // ──────────────────────────────────────────
+    const volumeBySuburbId = await fetchLiveSuburbVolumes(
+      uniqueSuburbs.map((s) => ({ suburb_id: s.suburb_id, name: s.name })),
+      keyword,
+      uniqueSuburbs
+    );
+
+    // ──────────────────────────────────────────
+    // 7. Create result placeholder rows (one per unique suburb)
     // ──────────────────────────────────────────
     for (const s of uniqueSuburbs) {
       await execute(
         `INSERT INTO serpmap_results
            (report_id, suburb_id, suburb_name, suburb_state, monthly_volume, dataforseo_status)
          VALUES ($1,$2,$3,$4,$5,'processing')`,
-        [reportId, s.suburb_id, s.name, s.state, getSuburbVolume(s, keyword)]
+        [reportId, s.suburb_id, s.name, s.state, volumeBySuburbId.get(s.suburb_id) ?? 0]
       );
     }
 
     // ──────────────────────────────────────────
-    // 7. Call DataforSEO LIVE endpoint — fresh data every time, no polling
+    // 8. Call DataforSEO LIVE endpoint — fresh data every time, no polling
     // ──────────────────────────────────────────
     const STATE_FULL: Record<string, string> = {
       VIC: "Victoria", NSW: "New South Wales", QLD: "Queensland",
@@ -191,7 +200,7 @@ export async function POST(req: NextRequest) {
     }
 
     // ──────────────────────────────────────────
-    // 8. Write live results back to DB
+    // 9. Write live results back to DB
     // ──────────────────────────────────────────
     let resolvedCount = 0;
     await Promise.allSettled(
@@ -216,7 +225,7 @@ export async function POST(req: NextRequest) {
     );
 
     // ──────────────────────────────────────────
-    // 9. Generate AI summary & opportunity cards (live — no cache)
+    // 10. Generate AI summary & opportunity cards (live — no cache)
     // ──────────────────────────────────────────
     const allResults = await query<SerpMapResult>(
       "SELECT * FROM serpmap_results WHERE report_id = $1",
@@ -249,7 +258,7 @@ export async function POST(req: NextRequest) {
     }
 
     // ──────────────────────────────────────────
-    // 10. Finalise report
+    // 11. Finalise report
     // ──────────────────────────────────────────
     await execute(
       `UPDATE serpmap_reports
@@ -274,7 +283,7 @@ export async function POST(req: NextRequest) {
     }
 
     // ──────────────────────────────────────────
-    // 11. Update quota counter
+    // 12. Update quota counter
     // ──────────────────────────────────────────
     await execute(
       `INSERT INTO serpmap_quota (quota_date, reports_count, api_calls_used, daily_limit, updated_at)

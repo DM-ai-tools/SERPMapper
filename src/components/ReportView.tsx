@@ -86,17 +86,26 @@ export default function ReportView({
     setTimeout(() => setCopied(false), 2000);
   }
 
-  // CTA destination — single env var controls the target (waitlist by default).
-  // Set NEXT_PUBLIC_LEAD_CTA_BASE_URL in Vercel env to switch to the live product.
-  const ctaBase =
-    process.env.NEXT_PUBLIC_LEAD_CTA_BASE_URL ?? "https://dotmappers.in/waitlist";
-  const finalCtaUrl =
-    ctaUrl ??
-    `${ctaBase}?` +
-      `url=${encodeURIComponent(report.business_url)}` +
-      `&keyword=${encodeURIComponent(report.keyword)}` +
-      `&suburb=${encodeURIComponent(topMissedSuburb ?? report.city)}` +
-      `&source=serpmap&report=${report.report_id}`;
+  // Always send strategy/book CTA traffic to Traffic Radius contact page.
+  const ctaBase = "https://trafficradius.com.au/contact-us/";
+  const params = new URLSearchParams({
+    url: report.business_url,
+    keyword: report.keyword,
+    suburb: topMissedSuburb ?? report.city,
+    source: "serpmap",
+    report: report.report_id,
+  });
+  if (ctaUrl) {
+    try {
+      const u = new URL(ctaUrl);
+      u.searchParams.forEach((v, k) => {
+        if (v && !params.has(k)) params.set(k, v);
+      });
+    } catch {
+      // Ignore malformed historical ctaUrl and use our base params.
+    }
+  }
+  const finalCtaUrl = `${ctaBase}?${params.toString()}`;
 
   return (
     <div className="w-full max-w-6xl mx-auto space-y-8 md:space-y-10">
@@ -338,7 +347,10 @@ function getBandInfo(position: number | null) {
   if (position <= 10) {
     return { band: { bg: "#F0FDF4", text: "#166534", dot: "#86EFAC", label: "Page 1" } };
   }
-  return { band: { bg: "#FFFBEB", text: "#92400E", dot: "#FCD34D", label: "Page 2" } };
+  if (position <= 20) {
+    return { band: { bg: "#FFFBEB", text: "#92400E", dot: "#FCD34D", label: "Page 2" } };
+  }
+  return { band: { bg: "#FEF2F2", text: "#B91C1C", dot: "#EF4444", label: "Not visible" } };
 }
 
 function ShareIcon() {

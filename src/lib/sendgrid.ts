@@ -4,7 +4,8 @@ sgMail.setApiKey(process.env.SENDGRID_API_KEY!);
 
 const FROM_EMAIL   = process.env.SENDGRID_FROM_EMAIL ?? "hello@serpmap.com.au";
 const APP_URL      = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
-const LEAD_CTA_BASE_URL = process.env.LEAD_CTA_BASE_URL ?? "https://dotmappers.in/waitlist";
+const LEAD_CTA_BASE_URL =
+  process.env.LEAD_CTA_BASE_URL ?? "https://trafficradius.com.au/contact-us/";
 
 export interface NurtureEmailData {
   email: string;
@@ -29,14 +30,16 @@ function rankLabel(pos: number | null): string {
   if (pos === null) return "Not visible";
   if (pos <= 3)     return `#${pos} — Top 3 ✅`;
   if (pos <= 10)    return `#${pos} — Page 1`;
-  return `#${pos} — Page 2`;
+  if (pos <= 20)    return `#${pos} — Page 2`;
+  return `#${pos} — Not visible`;
 }
 
 function rankColor(pos: number | null): string {
   if (pos === null) return "#ef4444";
   if (pos <= 3)     return "#22c55e";
   if (pos <= 10)    return "#86efac";
-  return "#fcd34d";
+  if (pos <= 20)    return "#fcd34d";
+  return "#ef4444";
 }
 
 // ── Inline HTML email template ────────────────────────────────

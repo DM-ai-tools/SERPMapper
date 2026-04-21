@@ -79,6 +79,16 @@ export interface DFSTaskResult {
   items: DFSMapResultItem[];
 }
 
+export interface DFSKeywordVolumeItem {
+  keyword: string;
+  search_volume?: number;
+  monthly_searches?: number;
+  keyword_info?: {
+    search_volume?: number;
+    monthly_searches?: number;
+  };
+}
+
 // ──────────────────────────────────────────────
 // Live endpoint — returns results synchronously.
 //
@@ -132,6 +142,46 @@ export async function getLiveResults(
   }
 
   return results;
+}
+
+// ──────────────────────────────────────────────
+// Keywords Data API (Google Ads) — monthly volume
+// Returns Map<keyword, volume>
+// ──────────────────────────────────────────────
+export async function getKeywordVolumes(
+  keywords: string[]
+): Promise<Map<string, number>> {
+  if (!keywords.length) return new Map();
+
+  const response = await dfsRequest<DFSApiResponse<DFSKeywordVolumeItem[]>>(
+    "POST",
+    "/keywords_data/google_ads/search_volume/live",
+    [
+      {
+        keywords,
+        location_code: 2036, // Australia
+        language_code: "en",
+      },
+    ]
+  );
+
+  const rows = response.tasks?.[0]?.result ?? [];
+  const map = new Map<string, number>();
+  for (const row of rows) {
+    const key = (row.keyword ?? "").trim();
+    if (!key) continue;
+    const volume = Number(
+      row.search_volume ??
+      row.monthly_searches ??
+      row.keyword_info?.search_volume ??
+      row.keyword_info?.monthly_searches ??
+      NaN
+    );
+    if (Number.isFinite(volume)) {
+      map.set(key, volume);
+    }
+  }
+  return map;
 }
 
 // ──────────────────────────────────────────────

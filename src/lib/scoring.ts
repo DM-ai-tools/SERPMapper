@@ -14,19 +14,22 @@ export function calculateVisibilityScore(results: SerpMapResult[]): number {
   if (results.length === 0) return 0;
 
   const rawMaxVolume = Math.max(...results.map((r) => r.monthly_volume || 0), 0);
-  // If we have no volume data for this keyword (all zeros), fall back to
-  // equal weighting so the score still reflects ranking positions.
   const maxVolume = rawMaxVolume === 0 ? 1 : rawMaxVolume;
+  const useEqualWeight = rawMaxVolume === 0;
 
   let weightedSum = 0;
   let totalPossible = 0;
 
   for (const result of results) {
-    const volumeWeight = rawMaxVolume === 0 ? 1 : (result.monthly_volume || 0) / maxVolume;
+    // Minimum floor of 0.1 ensures suburbs with 0 volume still contribute
+    // when a business ranks there (instead of being completely ignored).
+    const volumeWeight = useEqualWeight
+      ? 1
+      : Math.max((result.monthly_volume || 0) / maxVolume, 0.1);
     const rankWeight = RANK_WEIGHTS[getRankBand(result.rank_position)];
 
     weightedSum += rankWeight * volumeWeight;
-    totalPossible += volumeWeight; // max if ranked #1 everywhere
+    totalPossible += 1.0 * volumeWeight; // max possible: ranked #1 in every suburb
   }
 
   if (totalPossible === 0) return 0;
