@@ -1,5 +1,5 @@
 import { OpportunityCard, SerpMapReport, SerpMapResult } from "./types";
-import { isVisiblePosition } from "./scoring";
+import { calculateVisibilityScore, isVisiblePosition } from "./scoring";
 
 interface PdfInput {
   report: SerpMapReport;
@@ -87,7 +87,7 @@ export async function downloadReportPdf({ report, results, cards = [] }: PdfInpu
     `Website: ${report.business_url}`,
     `Keyword: ${report.keyword}`,
     `City: ${report.city}`,
-    `Visibility Score: ${report.visibility_score ?? 0}/100`,
+    `Visibility Score: ${calculateVisibilityScore(results)}/100`,
     `Visible Suburbs: ${visible.length}/${results.length}`,
     `Generated: ${new Date().toLocaleString()}`,
   ];

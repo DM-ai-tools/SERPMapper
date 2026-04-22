@@ -21,10 +21,30 @@ import {
   buildReportSummary,
   isVisiblePosition,
 } from "@/lib/scoring";
-import { AnalyzeRequest, AnalyzeResponse, SerpMapResult } from "@/lib/types";
+import { AnalyzeRequest, AnalyzeResponse, RankingDeviceType, SerpMapResult } from "@/lib/types";
 
 /** DataforSEO runs one request per suburb — allow enough time for ~60 suburbs. */
 export const maxDuration = 300;
+
+const PRIMARY_DEVICE: RankingDeviceType = "desktop";
+const DFS_DEVICE_PROFILES: Array<{
+  type: RankingDeviceType;
+  device: "desktop" | "mobile";
+  os: string;
+}> = [
+  { type: "desktop", device: "desktop", os: "windows" },
+  // Mobile/iOS profile is temporarily disabled.
+  // { type: "mobile", device: "mobile", os: "ios" },
+];
+
+function parseTaskTag(tag: string): { deviceType: RankingDeviceType; suburbId: string } | null {
+  const m = /^serpmap_[^_]+_(desktop|mobile)_(.+)$/.exec(tag);
+  if (!m) return null;
+  return {
+    deviceType: m[1] as RankingDeviceType,
+    suburbId: m[2],
+  };
+}
 
 function buildVisibilitySummaryFallback(opts: {
   displayName: string;
@@ -176,12 +196,14 @@ export async function POST(req: NextRequest) {
     // 7. Create result placeholder rows (one per unique suburb)
     // ──────────────────────────────────────────
     for (const s of uniqueSuburbs) {
-      await execute(
-        `INSERT INTO serpmap_results
-           (report_id, suburb_id, suburb_name, suburb_state, monthly_volume, dataforseo_status)
-         VALUES ($1,$2,$3,$4,$5,'processing')`,
-        [reportId, s.suburb_id, s.name, s.state, volumeBySuburbId.get(s.suburb_id) ?? 0]
-      );
+      for (const profile of DFS_DEVICE_PROFILES) {
+        await execute(
+          `INSERT INTO serpmap_results
+             (report_id, suburb_id, suburb_name, suburb_state, device_type, os_type, monthly_volume, dataforseo_status)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,'processing')`,
+          [reportId, s.suburb_id, s.name, s.state, profile.type, profile.os, volumeBySuburbId.get(s.suburb_id) ?? 0]
+        );
+      }
     }
 
     // ──────────────────────────────────────────
@@ -198,14 +220,16 @@ export async function POST(req: NextRequest) {
       ? `${city},${stateFull},Australia`
       : `${city},Australia`;
 
-    const dfsTaskRequests: DFSTaskPostRequest[] = uniqueSuburbs.map((s) => ({
-      keyword:       `${keyword} ${s.name}`,
-      location_name: s.dataforseo_location_name ?? cityLocationName,
-      language_name: "English",
-      device:        "desktop",
-      os:            "windows",
-      tag:           `serpmap_${reportId}_${s.suburb_id}`,
-    }));
+    const dfsTaskRequests: DFSTaskPostRequest[] = uniqueSuburbs.flatMap((s) =>
+      DFS_DEVICE_PROFILES.map((profile) => ({
+        keyword: `${keyword} ${s.name}`,
+        location_name: s.dataforseo_location_name ?? cityLocationName,
+        language_name: "English",
+        device: profile.device,
+        os: profile.os,
+        tag: `serpmap_${reportId}_${profile.type}_${s.suburb_id}`,
+      }))
+    );
 
     let cityMonthlyVolume: number | null = null;
     try {
@@ -266,24 +290,21 @@ export async function POST(req: NextRequest) {
     // ──────────────────────────────────────────
     // 9. Write live results back to DB
     // ──────────────────────────────────────────
-    let visibleCount = 0;
     await Promise.allSettled(
       liveResults.map(({ tag, result }) => {
-        const suburbId = tag.split("_").pop();
-        if (!suburbId) return Promise.resolve();
+        const parsedTag = parseTaskTag(tag);
+        if (!parsedTag) return Promise.resolve();
 
         const { position, inLocalPack } = result
           ? findBusinessRank(result, businessUrlForReport, businessName)
           : { position: null, inLocalPack: false };
 
-        if (isVisiblePosition(position)) visibleCount++;
-
         return execute(
           `UPDATE serpmap_results
            SET rank_position = $1, is_in_local_pack = $2,
                dataforseo_status = 'completed', updated_at = NOW()
-           WHERE report_id = $3 AND suburb_id = $4`,
-          [position, inLocalPack, reportId, suburbId]
+           WHERE report_id = $3 AND suburb_id = $4 AND device_type = $5`,
+          [position, inLocalPack, reportId, parsedTag.suburbId, parsedTag.deviceType]
         );
       })
     );
@@ -296,10 +317,18 @@ export async function POST(req: NextRequest) {
       [reportId]
     );
 
-    const score       = calculateVisibilityScore(allResults);
+    const resultsByDevice = new Map<RankingDeviceType, SerpMapResult[]>();
+    for (const row of allResults) {
+      const key = (row.device_type ?? "desktop") as RankingDeviceType;
+      if (!resultsByDevice.has(key)) resultsByDevice.set(key, []);
+      resultsByDevice.get(key)!.push(row);
+    }
+    const primaryResults = resultsByDevice.get(PRIMARY_DEVICE) ?? allResults;
+    const visibleCount = primaryResults.filter((r) => isVisiblePosition(r.rank_position)).length;
+    const score       = calculateVisibilityScore(primaryResults);
     const displayName = businessName ?? businessUrlForReport;
-    const summary     = buildReportSummary(allResults, displayName, keyword);
-    const missed      = getTopMissedSuburbs(allResults, 5);
+    const summary     = buildReportSummary(primaryResults, displayName, keyword);
+    const missed      = getTopMissedSuburbs(primaryResults, 5);
 
     let summaryText = "";
     let ctaCopy     = "";
@@ -357,13 +386,13 @@ export async function POST(req: NextRequest) {
         score,
         summaryText,
         ctaCopy,
-        allResults.filter(r => r.dataforseo_status === "completed").length,
+        primaryResults.filter((r) => r.dataforseo_status === "completed").length,
         cityMonthlyVolume,
         reportId,
       ]
     );
 
-    // Insert opportunity cards (fresh — no carry-over from previous runs)
+    // Insert opportunity cards per device profile (fresh — no carry-over from previous runs)
     const opportunityFallbacks = [
       (name: string) =>
         `${name} is a pocket where you still do not show on Google Maps — nearby customers are likely choosing whoever appears first.`,
@@ -383,17 +412,42 @@ export async function POST(req: NextRequest) {
         `Winning ${name} on Maps is about being findable at the moment of need — right now, that moment skips your business.`,
     ];
 
-    for (let i = 0; i < missed.length; i++) {
-      const suburb = missed[i];
-      const monthlyVolume = Number.isFinite(suburb.monthly_volume) ? Math.max(suburb.monthly_volume, 0) : 0;
-      const fallbackText = opportunityFallbacks[i % opportunityFallbacks.length](suburb.suburb_name);
-      const text = cardTexts[i] ?? fallbackText;
-      await execute(
-        `INSERT INTO opportunity_cards
-           (report_id, suburb_name, rank_position, monthly_volume, card_text, display_order)
-         VALUES ($1,$2,$3,$4,$5,$6)`,
-        [reportId, suburb.suburb_name, null, monthlyVolume, text, i]
-      );
+    const cardsByDevice = new Map<RankingDeviceType, string[]>();
+    cardsByDevice.set(PRIMARY_DEVICE, cardTexts);
+
+    for (const profile of DFS_DEVICE_PROFILES) {
+      const deviceResults = resultsByDevice.get(profile.type) ?? [];
+      const deviceMissed = getTopMissedSuburbs(deviceResults, 5);
+      if (!cardsByDevice.has(profile.type)) {
+        try {
+          const aiTexts =
+            deviceMissed.length > 0
+              ? await generateOpportunityCards(
+                  displayName,
+                  keyword,
+                  deviceMissed.map((s) => ({ name: s.suburb_name }))
+                )
+              : [];
+          cardsByDevice.set(profile.type, aiTexts);
+        } catch (err) {
+          console.warn(`[analyze] opportunity cards AI failed (${profile.type}):`, err);
+          cardsByDevice.set(profile.type, []);
+        }
+      }
+
+      const deviceCardTexts = cardsByDevice.get(profile.type) ?? [];
+      for (let i = 0; i < deviceMissed.length; i++) {
+        const suburb = deviceMissed[i];
+        const monthlyVolume = Number.isFinite(suburb.monthly_volume) ? Math.max(suburb.monthly_volume, 0) : 0;
+        const fallbackText = opportunityFallbacks[i % opportunityFallbacks.length](suburb.suburb_name);
+        const text = deviceCardTexts[i] ?? fallbackText;
+        await execute(
+          `INSERT INTO opportunity_cards
+             (report_id, suburb_name, device_type, rank_position, monthly_volume, card_text, display_order)
+           VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+          [reportId, suburb.suburb_name, profile.type, null, monthlyVolume, text, i]
+        );
+      }
     }
 
     // ──────────────────────────────────────────
@@ -406,7 +460,7 @@ export async function POST(req: NextRequest) {
          SET reports_count  = serpmap_quota.reports_count + 1,
              api_calls_used = serpmap_quota.api_calls_used + $2,
              updated_at     = NOW()`,
-      [today, uniqueSuburbs.length, dailyLimit]
+      [today, uniqueSuburbs.length * DFS_DEVICE_PROFILES.length, dailyLimit]
     );
 
     const response: AnalyzeResponse = {

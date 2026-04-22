@@ -36,11 +36,11 @@ export default async function SharedReportPage({ params }: Props) {
       [params.id]
     ),
     query<SerpMapResult>(
-      "SELECT * FROM serpmap_results WHERE report_id = $1 ORDER BY monthly_volume DESC",
+      "SELECT * FROM serpmap_results WHERE report_id = $1 AND (device_type = 'desktop' OR device_type IS NULL) ORDER BY rank_position ASC NULLS LAST, suburb_name ASC",
       [params.id]
     ),
     query<OpportunityCard>(
-      "SELECT * FROM opportunity_cards WHERE report_id = $1 ORDER BY display_order ASC",
+      "SELECT * FROM opportunity_cards WHERE report_id = $1 AND (device_type = 'desktop' OR device_type IS NULL) ORDER BY display_order ASC",
       [params.id]
     ),
   ]);

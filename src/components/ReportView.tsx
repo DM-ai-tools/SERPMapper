@@ -1,12 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import dynamic from "next/dynamic";
-import { SerpMapReport, SerpMapResult, OpportunityCard as OppCard } from "@/lib/types";
+import {
+  SerpMapReport,
+  SerpMapResult,
+  OpportunityCard as OppCard,
+} from "@/lib/types";
+import { calculateVisibilityScore, isVisiblePosition } from "@/lib/scoring";
 import OpportunityCard from "./OpportunityCard";
 import EmailGate from "./EmailGate";
 import ScoreGauge from "./ScoreGauge";
-import { isVisiblePosition } from "@/lib/scoring";
 import { downloadReportPdf } from "@/lib/pdf-report";
 
 // Leaflet must not SSR
@@ -32,6 +36,19 @@ export default function ReportView({
   const [topMissedSuburb, setTopMissedSuburb] = useState<string | null>(null);
   const businessLat = toNumberOrNull(report.business_lat);
   const businessLng = toNumberOrNull(report.business_lng);
+
+  const activeResults = useMemo(
+    () => results.filter((r) => isDesktopRow(r.device_type)),
+    [results]
+  );
+  const activeCards = useMemo(
+    () => cards.filter((c) => isDesktopRow(c.device_type)),
+    [cards]
+  );
+  const activeScore = useMemo(
+    () => calculateVisibilityScore(activeResults),
+    [activeResults]
+  );
 
   function handleUnlocked(url: string, suburb: string) {
     setCtaUrl(url);
@@ -89,7 +106,7 @@ export default function ReportView({
         <div className="flex items-center gap-2 flex-wrap">
           {/* PDF download */}
           <button
-            onClick={() => downloadReportPdf({ report, results, cards })}
+            onClick={() => downloadReportPdf({ report, results: activeResults, cards: activeCards })}
             className="flex items-center gap-2 px-4 py-2.5 border border-slate-200 rounded-xl text-sm font-medium
                        text-slate-700 bg-white hover:bg-slate-50 hover:border-slate-300 transition-all shadow-sm"
           >
@@ -105,7 +122,7 @@ export default function ReportView({
       {/* Score + summary */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div className="card-elevated p-6 flex flex-col items-center justify-center">
-          <ScoreGauge score={report.visibility_score ?? 0} />
+          <ScoreGauge score={activeScore} />
           <p className="text-sm font-medium text-slate-500 mt-3 text-center">Visibility score</p>
         </div>
 
@@ -116,15 +133,15 @@ export default function ReportView({
           </p>
           <div className="flex gap-3 text-sm flex-wrap">
             <Stat
-              value={`${results.filter((r) => isVisiblePosition(r.rank_position)).length}/${results.length}`}
+              value={`${activeResults.filter((r) => isVisiblePosition(r.rank_position)).length}/${activeResults.length}`}
               label="Suburbs ranking"
             />
             <Stat
-              value={`${results.filter((r) => isVisiblePosition(r.rank_position) && (r.rank_position ?? 99) <= 3).length}`}
+              value={`${activeResults.filter((r) => isVisiblePosition(r.rank_position) && (r.rank_position ?? 99) <= 3).length}`}
               label="Top 3 positions"
             />
             <Stat
-              value={`${results.filter((r) => !isVisiblePosition(r.rank_position)).length}`}
+              value={`${activeResults.filter((r) => !isVisiblePosition(r.rank_position)).length}`}
               label="Invisible suburbs"
             />
           </div>
@@ -140,7 +157,7 @@ export default function ReportView({
         >
           {businessLat !== null && businessLng !== null ? (
             <VisibilityMap
-              results={results}
+              results={activeResults}
               businessLat={businessLat}
               businessLng={businessLng}
               isPartial={isGated}
@@ -159,15 +176,15 @@ export default function ReportView({
               reportId={report.report_id}
               visibilityScore={report.visibility_score ?? 0}
               report={report}
-              results={results}
+              results={activeResults}
               onUnlocked={handleUnlocked}
             />
           ) : (
             <>
               <h2 className="font-bold text-slate-900 text-lg">Top missed opportunities</h2>
-              {cards.length > 0 ? (
+              {activeCards.length > 0 ? (
                 <div className="space-y-3">
-                  {cards.map((card, i) => (
+                  {activeCards.map((card, i) => (
                     <OpportunityCard key={card.card_id} card={card} rank={i + 1} />
                   ))}
                 </div>
@@ -206,9 +223,9 @@ export default function ReportView({
       {!isGated && results.length > 0 && (
         <div className="space-y-4">
           <div className="w-full">
-            <CitySearchVolumeCard report={report} results={results} />
+            <CitySearchVolumeCard report={report} results={activeResults} />
           </div>
-          <SuburbTable results={results} city={report.city} />
+          <SuburbTable results={activeResults} city={report.city} />
         </div>
       )}
     </div>
@@ -219,6 +236,10 @@ function toNumberOrNull(value: unknown): number | null {
   if (value === null || value === undefined) return null;
   const n = typeof value === "number" ? value : Number(value);
   return Number.isFinite(n) ? n : null;
+}
+
+function isDesktopRow(value: string | null | undefined): boolean {
+  return !value || value === "desktop";
 }
 
 // ──────────────────────────────────────────────

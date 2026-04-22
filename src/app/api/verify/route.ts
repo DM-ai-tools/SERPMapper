@@ -4,6 +4,8 @@ import { buildLeadCtaUrl, sendReportEmail } from "@/lib/sendgrid";
 import { SerpMapReport, SerpMapResult } from "@/lib/types";
 import { getTopMissedSuburbs } from "@/lib/scoring";
 
+const PRIMARY_DEVICE = "desktop";
+
 interface VerifyRequest {
   email: string;
   report_id: string;
@@ -78,7 +80,10 @@ export async function POST(req: NextRequest) {
     // Fetch report + results for full email
     const [report, results] = await Promise.all([
       queryOne<SerpMapReport>("SELECT * FROM serpmap_reports WHERE report_id = $1", [report_id]),
-      query<SerpMapResult>("SELECT * FROM serpmap_results WHERE report_id = $1", [report_id]),
+      query<SerpMapResult>(
+        "SELECT * FROM serpmap_results WHERE report_id = $1 AND (device_type = $2 OR device_type IS NULL)",
+        [report_id, PRIMARY_DEVICE]
+      ),
     ]);
 
     const topMissedSuburb = lead.top_missed_suburb ?? report?.city ?? "";

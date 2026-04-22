@@ -146,6 +146,24 @@ export default function VisibilityMap({
       if (!mapInstanceRef.current || !L) return;
 
       const displayResults = partial ? currentResults.slice(0, 10) : currentResults;
+      const displayIds = new Set(displayResults.map((r) => r.result_id));
+
+      // Remove layers that belong to a previous dataset (e.g. device toggle switch).
+      // Without this, old red/green polygons can remain and make counts look incorrect.
+      const staleLayerIds: string[] = [];
+      layersRef.current.forEach((_layer, resultId) => {
+        if (!displayIds.has(resultId)) staleLayerIds.push(resultId);
+      });
+      staleLayerIds.forEach((resultId) => {
+        const layer = layersRef.current.get(resultId);
+        if (!layer) return;
+        try {
+          mapInstanceRef.current?.removeLayer(layer);
+        } catch {
+          // Ignore layer removal edge cases.
+        }
+        layersRef.current.delete(resultId);
+      });
 
       // 1) Update colours for layers we already have (rank may change during streaming)
       for (const result of displayResults) {

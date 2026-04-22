@@ -4,6 +4,8 @@ import { sendReportEmail, buildLeadCtaUrl } from "@/lib/sendgrid";
 import { getTopMissedSuburbs } from "@/lib/scoring";
 import { LeadCaptureRequest, SerpMapReport, SerpMapResult } from "@/lib/types";
 
+const PRIMARY_DEVICE = "desktop";
+
 /**
  * POST /api/lead
  * Captures an email, generates an OTP, sends it, and returns {needs_otp: true}.
@@ -30,8 +32,8 @@ export async function POST(req: NextRequest) {
         [report_id]
       ),
       query<SerpMapResult>(
-        "SELECT * FROM serpmap_results WHERE report_id = $1",
-        [report_id]
+        "SELECT * FROM serpmap_results WHERE report_id = $1 AND (device_type = $2 OR device_type IS NULL)",
+        [report_id, PRIMARY_DEVICE]
       ),
     ]);
 

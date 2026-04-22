@@ -4,6 +4,7 @@
 
 export type ReportStatus = "pending" | "processing" | "partial" | "completed" | "failed";
 export type DataforSEOStatus = "pending" | "processing" | "completed" | "error";
+export type RankingDeviceType = "desktop" | "mobile";
 
 export interface SuburbCoordinate {
   suburb_id: string;
@@ -56,6 +57,8 @@ export interface SerpMapResult {
   suburb_id: string | null;
   suburb_name: string;
   suburb_state: string | null;
+  device_type: RankingDeviceType;
+  os_type: string | null;
   rank_position: number | null;
   is_in_local_pack: boolean;
   monthly_volume: number;
@@ -69,6 +72,7 @@ export interface OpportunityCard {
   card_id: string;
   report_id: string;
   suburb_name: string;
+  device_type: RankingDeviceType;
   rank_position: number | null;
   monthly_volume: number;
   card_text: string;
