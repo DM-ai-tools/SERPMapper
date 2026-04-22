@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Inter, Montserrat } from "next/font/google";
 import "./globals.css";
 import LogoutButton from "@/components/LogoutButton";
+import PoweredByTrafficRadius from "@/components/PoweredByTrafficRadius";
 
 const sans = Inter({
   subsets: ["latin"],
@@ -101,6 +102,7 @@ export default function RootLayout({
               >
                 Strategic call
               </a>
+              <PoweredByTrafficRadius />
             </div>
           </div>
         </header>
